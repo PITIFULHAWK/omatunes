@@ -48,6 +48,8 @@ pub enum Message {
     DeletePlaylist(i64),
     CopyCurrentTrack,
     PasteToPlaylist,
+    // Paths resolvidos do clipboard do Wayland (pode ser vazio)
+    ClipboardPaste(Vec<std::path::PathBuf>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -386,14 +388,31 @@ impl AppState {
             }
 
             Message::PasteToPlaylist => {
-                if let (Some(track), Some(playlist_id)) =
-                    (self.clipboard_track.clone(), self.selected_playlist)
-                {
-                    self.db.add_track_to_playlist(playlist_id, track.id).ok();
-                    self.playlist_tracks =
-                        self.db.playlist_tracks(playlist_id).unwrap_or_default();
-                    self.playlists = self.db.all_playlists().unwrap_or_default();
+                // Tenta ler URIs do clipboard do Wayland; se não houver, usa clipboard interno
+                Task::perform(read_clipboard_uris(), Message::ClipboardPaste)
+            }
+
+            Message::ClipboardPaste(paths) => {
+                let Some(playlist_id) = self.selected_playlist else {
+                    return Task::none();
+                };
+
+                if paths.is_empty() {
+                    // Fallback: clipboard interno (faixa copiada com Ctrl+C no lavanda)
+                    if let Some(track) = &self.clipboard_track {
+                        self.db.add_track_to_playlist(playlist_id, track.id).ok();
+                    }
+                } else {
+                    // Arquivos vindos do file manager
+                    for path in &paths {
+                        if let Some(id) = self.db.track_id_by_path(&path.to_string_lossy()) {
+                            self.db.add_track_to_playlist(playlist_id, id).ok();
+                        }
+                    }
                 }
+
+                self.playlist_tracks = self.db.playlist_tracks(playlist_id).unwrap_or_default();
+                self.playlists = self.db.all_playlists().unwrap_or_default();
                 Task::none()
             }
 
@@ -569,6 +588,51 @@ fn music_subfolders(music_dir: &PathBuf) -> Vec<PathBuf> {
 fn dirs_next() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     PathBuf::from(home).join(".local/share/lavanda")
+}
+
+/// Lê o clipboard do Wayland via `wl-paste` e retorna os caminhos de arquivo.
+/// Retorna Vec vazio se não houver URIs de arquivo ou `wl-paste` não estiver disponível.
+async fn read_clipboard_uris() -> Vec<std::path::PathBuf> {
+    let Ok(out) = tokio::process::Command::new("wl-paste")
+        .args(["--type", "text/uri-list"])
+        .output()
+        .await
+    else {
+        return Vec::new();
+    };
+
+    if !out.status.success() {
+        return Vec::new();
+    }
+
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|l| l.starts_with("file://"))
+        .filter_map(|l| {
+            let decoded = percent_decode(l.trim_start_matches("file://"));
+            Some(std::path::PathBuf::from(decoded))
+        })
+        .collect()
+}
+
+fn percent_decode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(hex) = std::str::from_utf8(&bytes[i + 1..i + 3]) {
+                if let Ok(b) = u8::from_str_radix(hex, 16) {
+                    out.push(b as char);
+                    i += 3;
+                    continue;
+                }
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
 }
 
 fn build_iced_theme() -> Theme {

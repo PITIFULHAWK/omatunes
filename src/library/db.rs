@@ -204,6 +204,14 @@ impl Database {
         Ok(removed)
     }
 
+    pub fn track_id_by_path(&self, path: &str) -> Option<i64> {
+        self.conn.query_row(
+            "SELECT id FROM tracks WHERE path = ?1",
+            params![path],
+            |r| r.get(0),
+        ).ok()
+    }
+
     pub fn track_mtime(&self, path: &str) -> Option<u64> {
         self.conn.query_row(
             "SELECT mtime FROM tracks WHERE path = ?1",
