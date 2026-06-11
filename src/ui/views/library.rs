@@ -1,0 +1,176 @@
+use iced::widget::{button, column, container, row, scrollable, text, Space};
+use iced::{Alignment, Element, Length};
+
+use crate::app::{AppState, Message};
+use crate::ui::theme;
+
+pub fn view(state: &AppState) -> Element<'_, Message> {
+    let sidebar = folder_sidebar(state);
+    let track_list = track_list_view(state);
+
+    row![sidebar, track_list]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+fn folder_sidebar(state: &AppState) -> Element<'_, Message> {
+    let items: Element<Message> = column(
+        state.folders.iter().map(|path| {
+            let is_selected = state.selected_folder.as_ref() == Some(path);
+            let name = path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("?");
+
+            let label = text(name)
+                .color(if is_selected { theme::accent() } else { theme::text() })
+                .size(14);
+
+            let btn = button(label)
+                .on_press(Message::SelectFolder(path.clone()))
+                .style(iced::widget::button::text)
+                .width(Length::Fill)
+                .padding([6, 12]);
+
+            if is_selected {
+                container(btn)
+                    .style(theme::selected_row)
+                    .width(Length::Fill)
+                    .into()
+            } else {
+                container(btn)
+                    .width(Length::Fill)
+                    .into()
+            }
+        })
+        .collect::<Vec<_>>(),
+    )
+    .spacing(2)
+    .into();
+
+    container(
+        column![
+            text("Pastas")
+                .color(theme::subtext())
+                .size(11)
+                .font(crate::ui::icons::UI_FONT_BOLD),
+            Space::with_height(8),
+            scrollable(items).height(Length::Fill),
+        ]
+        .padding(8),
+    )
+    .style(theme::sidebar)
+    .width(200)
+    .height(Length::Fill)
+    .into()
+}
+
+fn track_list_view(state: &AppState) -> Element<'_, Message> {
+    if state.tracks.is_empty() {
+        return container(
+            text(if state.selected_folder.is_some() {
+                "Nenhuma faixa encontrada"
+            } else {
+                "Selecione uma pasta"
+            })
+            .color(theme::overlay0())
+            .size(15),
+        )
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into();
+    }
+
+    let current_id = state.current_track.as_ref().map(|t| t.id);
+
+    // Agrupa faixas por álbum mantendo a ordem de inserção
+    let mut groups: Vec<(String, i64, Vec<&crate::library::models::Track>)> = Vec::new();
+    for track in &state.tracks {
+        if let Some(last) = groups.last_mut() {
+            if last.1 == track.album_id {
+                last.2.push(track);
+                continue;
+            }
+        }
+        groups.push((track.album.clone(), track.album_id, vec![track]));
+    }
+
+    let mut rows: Vec<Element<Message>> = Vec::new();
+
+    for (album_name, _album_id, tracks) in groups.into_iter() {
+        let n = tracks.len();
+        let header = container(
+            row![
+                text(album_name)
+                    .color(theme::accent())
+                    .size(13)
+                    .font(crate::ui::icons::UI_FONT_BOLD),
+                Space::with_width(Length::Fill),
+                text(format!("{n} faixa{}", if n == 1 { "" } else { "s" }))
+                    .color(theme::overlay0())
+                    .size(11),
+            ]
+            .align_y(Alignment::Center)
+            .padding([6, 12]),
+        )
+        .style(theme::album_header)
+        .width(Length::Fill);
+
+        rows.push(header.into());
+
+        for track in tracks.into_iter() {
+            let is_current = current_id == Some(track.id);
+            let row_color = if is_current { theme::accent() } else { theme::text() };
+
+            let num = track.track_number
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "·".to_string());
+
+            let track_row = row![
+                text(num)
+                    .color(theme::overlay0())
+                    .size(13)
+                    .width(30),
+                text(track.title.clone())
+                    .color(row_color)
+                    .size(14)
+                    .width(Length::FillPortion(3)),
+                text(track.artist.clone())
+                    .color(theme::subtext())
+                    .size(13)
+                    .width(Length::FillPortion(2)),
+                text(track.duration_str())
+                    .color(theme::subtext())
+                    .size(13)
+                    .width(60),
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center)
+            .padding([5, 12]);
+
+            let styled = if is_current {
+                container(track_row).style(theme::selected_row).width(Length::Fill)
+            } else {
+                container(track_row).width(Length::Fill)
+            };
+
+            rows.push(
+                button(styled)
+                    .on_press(Message::PlayTrack(track.clone()))
+                    .style(iced::widget::button::text)
+                    .width(Length::Fill)
+                    .padding(0)
+                    .into(),
+            );
+        }
+
+        rows.push(Space::with_height(8).into());
+    }
+
+    container(scrollable(column(rows).spacing(1)))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}

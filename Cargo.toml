@@ -1,0 +1,50 @@
+[package]
+name = "lavanda"
+version = "0.1.0-beta"
+edition = "2021"
+
+[dependencies]
+# GUI
+iced = { version = "0.13", features = ["image", "canvas", "tokio"] }
+
+# Áudio — decode
+symphonia = { version = "0.5", features = ["all"] }
+
+# Áudio — output
+cpal = "0.15"
+
+# Tags / metadados
+lofty = "0.21"
+
+# MPRIS2 (D-Bus)
+mpris-server = "0.8"
+
+# FFT para visualizador de espectro
+rustfft = "6.2"
+
+# Banco de dados para biblioteca
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Scanner de diretório
+walkdir = "2"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Processamento de imagem (capas de álbum)
+image = "0.25"
+
+# Erros ergonômicos
+thiserror = "2"
+anyhow = "1"
+
+# Traits async
+async-trait = "0.1"
+
+# Gerador de números aleatórios (shuffle)
+rand = "0.8"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
