@@ -30,6 +30,11 @@ pub enum Message {
     ToggleShuffle,
     ToggleRepeat,
 
+    // Seek relativo em segundos (positivo = avança, negativo = volta)
+    SeekRelative(i64),
+    // Ajuste de volume em delta (ex: +0.05 ou -0.05)
+    VolumeStep(f32),
+
     // Poll periódico do canal de eventos de áudio e MPRIS
     PollAudio,
     // Verificação periódica de mudança de tema
@@ -230,9 +235,28 @@ impl AppState {
                 Task::none()
             }
 
+            Message::SeekRelative(delta_secs) => {
+                let new_pos = if delta_secs < 0 {
+                    self.position.saturating_sub(Duration::from_secs(delta_secs.unsigned_abs()))
+                } else {
+                    (self.position + Duration::from_secs(delta_secs as u64)).min(self.duration)
+                };
+                self.audio.send(AudioCommand::Seek(new_pos));
+                self.position = new_pos;
+                Task::none()
+            }
+
             Message::VolumeChanged(v) => {
                 self.volume = v;
                 self.audio.send(AudioCommand::SetVolume(self.volume));
+                self.send_mpris(MprisUpdate::Volume(v as f64));
+                Task::none()
+            }
+
+            Message::VolumeStep(delta) => {
+                let v = (self.volume + delta).clamp(0.0, 1.0);
+                self.volume = v;
+                self.audio.send(AudioCommand::SetVolume(v));
                 self.send_mpris(MprisUpdate::Volume(v as f64));
                 Task::none()
             }
@@ -393,6 +417,25 @@ impl AppState {
         Subscription::batch([
             iced::time::every(Duration::from_millis(100)).map(|_| Message::PollAudio),
             iced::time::every(Duration::from_secs(3)).map(|_| Message::CheckTheme),
+            iced::keyboard::on_key_press(|key, _mods| {
+                use iced::keyboard::Key;
+                use iced::keyboard::key::Named;
+                match key {
+                    Key::Named(Named::Space)      => Some(Message::PlayPause),
+                    Key::Named(Named::ArrowRight) => Some(Message::SeekRelative(5)),
+                    Key::Named(Named::ArrowLeft)  => Some(Message::SeekRelative(-5)),
+                    Key::Character(ref c) => match c.as_str() {
+                        "n" | "N" => Some(Message::NextTrack),
+                        "p" | "P" => Some(Message::PreviousTrack),
+                        "s" | "S" => Some(Message::ToggleShuffle),
+                        "r" | "R" => Some(Message::ToggleRepeat),
+                        "+" | "=" => Some(Message::VolumeStep(0.05)),
+                        "-"       => Some(Message::VolumeStep(-0.05)),
+                        _ => None,
+                    },
+                    _ => None,
+                }
+            }),
         ])
     }
 
