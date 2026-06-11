@@ -199,6 +199,11 @@ impl AppState {
             Message::PlayTrack(track) => {
                 self.audio.send(AudioCommand::Play(track.path.clone()));
                 self.audio.send(AudioCommand::SetVolume(self.volume));
+                self.queue = if self.tab == Tab::Playlists {
+                    self.playlist_tracks.clone()
+                } else {
+                    self.tracks.clone()
+                };
                 self.current_track = Some(track);
                 self.playback_state = PlaybackState::Playing;
                 self.position = Duration::ZERO;
@@ -220,6 +225,7 @@ impl AppState {
                     }
                     PlaybackState::Stopped => {
                         if let Some(first) = self.tracks.first().cloned() {
+                            self.queue = self.tracks.clone();
                             self.audio.send(AudioCommand::Play(first.path.clone()));
                             self.current_track = Some(first);
                             self.playback_state = PlaybackState::Playing;
@@ -537,15 +543,15 @@ impl AppState {
     }
 
     fn advance_track(&mut self, delta: i32) {
-        if self.tracks.is_empty() {
+        if self.queue.is_empty() {
             return;
         }
 
         let next_idx = if self.shuffle {
             use rand::Rng;
             let current_idx = self.current_track.as_ref()
-                .and_then(|ct| self.tracks.iter().position(|t| t.id == ct.id));
-            let len = self.tracks.len();
+                .and_then(|ct| self.queue.iter().position(|t| t.id == ct.id));
+            let len = self.queue.len();
             if len == 1 {
                 0
             } else {
@@ -558,17 +564,17 @@ impl AppState {
             }
         } else {
             let current_idx = self.current_track.as_ref()
-                .and_then(|ct| self.tracks.iter().position(|t| t.id == ct.id));
+                .and_then(|ct| self.queue.iter().position(|t| t.id == ct.id));
             match current_idx {
                 Some(i) => {
                     let new = i as i32 + delta;
-                    if new < 0 { self.tracks.len() - 1 } else { new as usize % self.tracks.len() }
+                    if new < 0 { self.queue.len() - 1 } else { new as usize % self.queue.len() }
                 }
                 None => 0,
             }
         };
 
-        if let Some(track) = self.tracks.get(next_idx).cloned() {
+        if let Some(track) = self.queue.get(next_idx).cloned() {
             self.audio.send(AudioCommand::Play(track.path.clone()));
             self.current_track = Some(track);
             self.playback_state = PlaybackState::Playing;

@@ -160,6 +160,19 @@ struct TrackInfo {
     cover: Option<Vec<u8>>,
 }
 
+const COVER_FILENAMES: &[&str] = &["cover.jpg", "cover.png", "cover.webp", "folder.jpg", "folder.png"];
+
+fn cover_from_folder(path: &Path) -> Option<Vec<u8>> {
+    let dir = path.parent()?;
+    for name in COVER_FILENAMES {
+        let candidate = dir.join(name);
+        if let Ok(data) = std::fs::read(&candidate) {
+            return Some(data);
+        }
+    }
+    None
+}
+
 fn read_tags(path: &Path) -> Result<TrackInfo> {
     let tagged = Probe::open(path)?.read()?;
 
@@ -212,7 +225,7 @@ fn read_tags(path: &Path) -> Result<TrackInfo> {
         t.pictures().iter().find(|p| {
             matches!(p.pic_type(), lofty::picture::PictureType::CoverFront | lofty::picture::PictureType::Other)
         }).map(|p| p.data().to_vec())
-    });
+    }).or_else(|| cover_from_folder(path));
 
     Ok(TrackInfo { title, artist, album_artist, album, year, track_number, duration_ms, cover })
 }
