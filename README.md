@@ -1,6 +1,6 @@
 # lavanda
 
-A native Wayland music player written in Rust, built for [Omarchy](https://omarchy.org/) / Hyprland rices. Themed with [Catppuccin Mocha](https://github.com/catppuccin/catppuccin) and accented in lavender (`#cba6f7`).
+A native Wayland music player written in Rust, built for [Omarchy](https://omarchy.org/) / Hyprland rices. Follows the active Omarchy theme automatically — colors update live when you switch themes.
 
 ![lavanda](https://raw.githubusercontent.com/sheep-farm/lavanda/master/assets/screenshot.png)
 
@@ -17,7 +17,7 @@ A native Wayland music player written in Rust, built for [Omarchy](https://omarc
 - **Album art** — embedded cover displayed in the player panel
 - **MPRIS2** — full D-Bus integration; works with `playerctl`, Waybar `mpris` module, AGS, EWW, etc.
 - **Nerd Font icons** — Font Awesome tier-1 codepoints (universal across any Nerd Font)
-- **Catppuccin Mocha theme** — `BASE #11111b`, `TEXT #cdd6f4`, `ACCENT #cba6f7`
+- **Live Omarchy theming** — reads `~/.config/omarchy/current/theme.name` and updates the palette within 3 seconds of a theme switch; no restart required
 
 ---
 
@@ -65,16 +65,45 @@ The library database is stored at `~/.local/share/lavanda/lavanda.db`. Delete it
 
 ---
 
-## Waybar integration
+## Omarchy theming
 
-Add to your Waybar `config.jsonc`:
+lavanda reads the active Omarchy theme from `~/.config/omarchy/current/theme.name` and maps its `colors.toml` to the UI palette:
+
+| `colors.toml` key | lavanda role |
+|---|---|
+| `background` | window background |
+| `foreground` | primary text |
+| `accent` | accent color (highlights, active elements) |
+| `color8` | muted/overlay color; also used to derive surface shades |
+| `color1`–`color4` | red / green / yellow / blue |
+| `color15` | subtext |
+
+Works with all built-in Omarchy themes (Catppuccin, Nord, Gruvbox, Tokyo Night, Rose Pinè, etc.) and custom user themes in `~/.config/omarchy/themes/`.
+
+### Waybar integration
+
+For the Waybar `mpris` module to also follow the theme, add an Omarchy `theme-set` hook at `~/.config/omarchy/hooks/theme-set` that regenerates `~/.config/waybar/colors.css` and sends `SIGUSR2` to Waybar. An example hook is shown below — adapt it to the CSS variable names your `style.css` uses:
+
+```bash
+#!/bin/bash
+THEME_NAME="$1"
+COLORS_FILE="$HOME/.config/omarchy/themes/$THEME_NAME/colors.toml"
+[ -f "$COLORS_FILE" ] || COLORS_FILE="$HOME/.local/share/omarchy/themes/$THEME_NAME/colors.toml"
+[ -f "$COLORS_FILE" ] || exit 0
+
+get_color() { grep -E "^$1\s*=" "$COLORS_FILE" | grep -oE '[0-9a-fA-F]{6}' | head -1; }
+
+BG=$(get_color background); FG=$(get_color foreground); ACCENT=$(get_color accent)
+# ... generate your colors.css ...
+pkill -SIGUSR2 waybar 2>/dev/null
+```
+
+Style the module via CSS classes — avoid hardcoded Pango colors in `format`:
 
 ```jsonc
-"modules-center": ["mpris"],
-
 "mpris": {
-    "format": "<span color='#c4a0f0'>{player_icon}</span>  {title} — {artist}",
-    "format-paused": "<span color='#6c7086'>{player_icon}</span>  <i>{title} — {artist}</i>",
+    "format": "{player_icon}  {title} — {artist}",
+    "format-paused": "{player_icon}  {title} — {artist}",
     "format-stopped": "",
     "player-icons": { "lavanda": "󰝚", "default": "󰝚" },
     "status-icons": { "paused": "󰏤", "playing": "󰐊", "stopped": "󰓛" },
@@ -87,10 +116,10 @@ Add to your Waybar `config.jsonc`:
 }
 ```
 
-Then reload Waybar:
-
-```bash
-pkill -SIGUSR2 waybar
+```css
+/* style.css */
+#mpris         { color: @ACCENT; }
+#mpris.paused  { color: @GRAY0; font-style: italic; }
 ```
 
 ---
@@ -127,7 +156,7 @@ src/
 │   ├── db.rs           # SQLite queries (rusqlite, bundled)
 │   └── models.rs       # Track, Album, Artist, Playlist
 └── ui/
-    ├── theme.rs        # Catppuccin Mocha palette + container styles
+    ├── theme.rs        # Omarchy theme reader + live palette + container styles
     ├── icons.rs        # Nerd Font constants + UI font constants
     ├── views/          # library, player, playlist views
     └── components/     # progress bar, playback controls
