@@ -52,6 +52,38 @@ cargo install --git https://github.com/sheep-farm/lavanda
 
 ---
 
+## Configuration
+
+lavanda generates `~/.config/lavanda/config.toml` on first run with all options commented and set to their defaults. Edit it with any text editor; changes take effect on next launch.
+
+```toml
+# ~/.config/lavanda/config.toml
+
+# Path to your music library. Subdirectories are shown as folders in the sidebar.
+music_dir = "~/Music"
+
+# Initial volume (0.0 = mute, 1.0 = 100%)
+volume = 0.8
+
+# Start the session with shuffle enabled
+shuffle = false
+
+# Start the session with repeat enabled
+repeat = false
+
+# Interface language. Options: "auto", "en", "pt_BR", "es"
+# "auto" detects from $LANG
+language = "auto"
+
+# Seek step in seconds for the ← → arrow keys
+seek_step = 5
+
+# Volume delta per + / - keypress
+volume_step = 0.05
+```
+
+---
+
 ## Music library
 
 lavanda scans `~/Music` on startup. Subdirectories are shown as folders in the sidebar — the structure you already have is respected.
