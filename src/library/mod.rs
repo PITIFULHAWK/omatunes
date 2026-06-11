@@ -4,4 +4,4 @@ pub mod scanner;
 
 pub use db::Database;
 pub use models::{Album, Artist, Playlist, Track};
-pub use scanner::scan_directory;
+pub use scanner::{scan_directory, scan_file};

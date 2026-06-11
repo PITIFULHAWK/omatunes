@@ -11,6 +11,65 @@ use super::db::Database;
 
 const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "ogg", "opus", "wav", "aac", "m4a", "wma", "aiff"];
 
+/// Indexa um único arquivo de áudio no banco. Retorna `true` se foi inserido/atualizado,
+/// `false` se a extensão não é suportada. Erros de leitura de tag são impressos e retornam `false`.
+pub fn scan_file(db: &Database, path: &Path) -> Result<bool> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase());
+
+    let Some(ext) = ext else { return Ok(false) };
+    if !AUDIO_EXTENSIONS.contains(&ext.as_str()) {
+        return Ok(false);
+    }
+
+    let path_str = path.to_string_lossy().to_string();
+
+    let mtime = path
+        .metadata()
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    if db.track_mtime(&path_str) == Some(mtime) {
+        return Ok(true);
+    }
+
+    match read_tags(path) {
+        Ok(info) => {
+            let artist_id = db.upsert_artist(&info.artist)?;
+            let album_artist_id = db.upsert_artist(
+                if info.album_artist.is_empty() { &info.artist } else { &info.album_artist },
+            )?;
+            let album_id = db.upsert_album(
+                &info.album,
+                album_artist_id,
+                info.year,
+                info.cover.as_deref(),
+            )?;
+            db.upsert_track(
+                &path_str,
+                &info.title,
+                artist_id,
+                album_id,
+                &info.album_artist,
+                info.track_number,
+                info.duration_ms,
+                mtime,
+                info.cover.as_deref(),
+            )?;
+            Ok(true)
+        }
+        Err(e) => {
+            eprintln!("Erro ao ler tags de {path_str}: {e}");
+            Ok(false)
+        }
+    }
+}
+
 pub fn scan_directory(db: &Database, root: &Path) -> Result<usize> {
     let mut count = 0;
     let mut seen: HashSet<String> = HashSet::new();

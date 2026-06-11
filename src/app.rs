@@ -403,9 +403,14 @@ impl AppState {
                         self.db.add_track_to_playlist(playlist_id, track.id).ok();
                     }
                 } else {
-                    // Arquivos vindos do file manager
+                    // Arquivos vindos do file manager — indexa na hora se necessário
                     for path in &paths {
-                        if let Some(id) = self.db.track_id_by_path(&path.to_string_lossy()) {
+                        let path_str = path.to_string_lossy();
+                        let id = self.db.track_id_by_path(&path_str).or_else(|| {
+                            crate::library::scan_file(&self.db, path).ok()?;
+                            self.db.track_id_by_path(&path_str)
+                        });
+                        if let Some(id) = id {
                             self.db.add_track_to_playlist(playlist_id, id).ok();
                         }
                     }
@@ -616,23 +621,23 @@ async fn read_clipboard_uris() -> Vec<std::path::PathBuf> {
 }
 
 fn percent_decode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
     let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(s.len());
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
             if let Ok(hex) = std::str::from_utf8(&bytes[i + 1..i + 3]) {
                 if let Ok(b) = u8::from_str_radix(hex, 16) {
-                    out.push(b as char);
+                    out.push(b);
                     i += 3;
                     continue;
                 }
             }
         }
-        out.push(bytes[i] as char);
+        out.push(bytes[i]);
         i += 1;
     }
-    out
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn build_iced_theme() -> Theme {
