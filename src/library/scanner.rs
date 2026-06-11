@@ -189,7 +189,13 @@ fn read_tags(path: &Path) -> Result<TrackInfo> {
     Ok(TrackInfo { title, artist, album_artist, album, track_number, duration_ms, cover })
 }
 
-const COVER_FILENAMES: &[&str] = &["cover.jpg", "cover.png", "cover.webp", "folder.jpg", "folder.png"];
+const COVER_FILENAMES: &[&str] = &[
+    "cover.jpg", "Cover.jpg",
+    "cover.png", "Cover.png",
+    "cover.webp", "Cover.webp",
+    "folder.jpg", "Folder.jpg",
+    "folder.png", "Folder.png",
+];
 
 fn cover_from_folder(path: &Path) -> Option<Vec<u8>> {
     let dir = path.parent()?;
