@@ -28,6 +28,14 @@ pub enum ViewMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActiveFocus {
+    SidebarSearch,
+    SongSearch,
+    SidebarList,
+    Tracklist,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortColumn {
     TrackNumber,
     Title,
@@ -220,6 +228,7 @@ pub struct AppState {
     pub playlist_height: f32,
     pub playlist_height_initialized: bool,
     pub dragging_playlist_split: bool,
+    pub active_focus: Option<ActiveFocus>,
     pub window_height: f32,
     pub sort_column: Option<SortColumn>,
     pub sort_ascending: bool,
@@ -323,6 +332,7 @@ impl AppState {
             playlist_height: 141.0,
             playlist_height_initialized: false,
             dragging_playlist_split: false,
+            active_focus: None,
             window_height: 640.0,
             sort_column: None,
             sort_ascending: true,
@@ -755,6 +765,7 @@ impl AppState {
 
             Message::SearchChanged(val) => {
                 self.search_query = val;
+                self.active_focus = Some(ActiveFocus::SongSearch);
                 self.update_filtered_tracks();
                 Task::none()
             }
@@ -823,6 +834,7 @@ impl AppState {
                 self.last_click_playlist = Some((name.clone(), now));
                 self.selected_playlist = Some(name);
                 self.selected_folder = None;
+                self.active_focus = Some(ActiveFocus::SidebarList);
                 self.search_query.clear();
                 self.update_filtered_tracks();
                 Task::none()
@@ -1205,6 +1217,7 @@ impl AppState {
                 self.selected_playlist = None;
                 self.selected_folder = None;
                 self.selected_album = None;
+                self.active_focus = Some(ActiveFocus::SidebarList);
                 self.search_query.clear();
                 self.update_filtered_tracks();
                 Task::none()
@@ -1223,6 +1236,7 @@ impl AppState {
                 self.selected_playlist = None;
                 self.selected_folder = None;
                 self.selected_artist = None;
+                self.active_focus = Some(ActiveFocus::SidebarList);
                 self.search_query.clear();
                 self.update_filtered_tracks();
                 Task::none()
@@ -1352,7 +1366,7 @@ impl AppState {
             }
 
             Message::KeyboardArrowUp => {
-                if self.is_hovering_tracklist && !self.tracks.is_empty() {
+                if (self.is_hovering_tracklist || self.active_focus == Some(ActiveFocus::Tracklist)) && !self.tracks.is_empty() {
                     let current_idx = self.selected_track.as_ref()
                         .and_then(|st| self.tracks.iter().position(|t| t.id == st.id));
                     let next_idx = match current_idx {
@@ -1373,7 +1387,7 @@ impl AppState {
                             );
                         }
                     }
-                } else if self.is_hovering_sidebar_list {
+                } else if self.is_hovering_sidebar_list || self.active_focus == Some(ActiveFocus::SidebarList) {
                     match self.view_mode {
                         ViewMode::Artists => {
                             let artists = self.artists();
@@ -1426,7 +1440,7 @@ impl AppState {
             }
 
             Message::KeyboardArrowDown => {
-                if self.is_hovering_tracklist && !self.tracks.is_empty() {
+                if (self.is_hovering_tracklist || self.active_focus == Some(ActiveFocus::Tracklist)) && !self.tracks.is_empty() {
                     let current_idx = self.selected_track.as_ref()
                         .and_then(|st| self.tracks.iter().position(|t| t.id == st.id));
                     let next_idx = match current_idx {
@@ -1447,7 +1461,7 @@ impl AppState {
                             );
                         }
                     }
-                } else if self.is_hovering_sidebar_list {
+                } else if self.is_hovering_sidebar_list || self.active_focus == Some(ActiveFocus::SidebarList) {
                     match self.view_mode {
                         ViewMode::Artists => {
                             let artists = self.artists();
@@ -1537,6 +1551,7 @@ impl AppState {
                     }
                 }
                 self.last_click_track = Some((track.id, now));
+                self.active_focus = Some(ActiveFocus::Tracklist);
                 let cover_data = load_cover(&track.path);
                 let track = Track { cover_data, ..track };
 
@@ -1602,6 +1617,12 @@ impl AppState {
                             return Task::done(Message::SaveTags);
                         } else if has_playlist_dialog {
                             return Task::done(Message::PlaylistDialogSubmit);
+                        } else if !has_shortcuts && !has_context_menu {
+                            if self.active_focus == Some(ActiveFocus::Tracklist) {
+                                if let Some(ref track) = self.selected_track {
+                                    return Task::done(Message::DoubleClickTrack(track.clone()));
+                                }
+                            }
                         }
                     }
                     Key::Named(Named::Escape) => {
@@ -1613,6 +1634,52 @@ impl AppState {
                             return Task::done(Message::CloseTagEditor);
                         } else if has_context_menu {
                             return Task::done(Message::ToggleContextMenu(None));
+                        }
+                    }
+                    Key::Named(Named::Tab) => {
+                        if !has_tag_editor && !has_playlist_dialog && !has_shortcuts && !has_context_menu {
+                            if self.active_focus == Some(ActiveFocus::SidebarSearch) {
+                                self.active_focus = Some(ActiveFocus::SidebarList);
+                                match self.view_mode {
+                                    ViewMode::Artists => {
+                                        if self.selected_artist.is_none() {
+                                            if let Some(artist) = self.artists().first().cloned() {
+                                                self.selected_artist = Some(artist);
+                                                self.update_filtered_tracks();
+                                            }
+                                        }
+                                    }
+                                    ViewMode::Albums => {
+                                        if self.selected_album.is_none() {
+                                            if let Some(album) = self.albums().first().cloned() {
+                                                self.selected_album = Some(album);
+                                                self.update_filtered_tracks();
+                                            }
+                                        }
+                                    }
+                                    ViewMode::Genres => {
+                                        if self.selected_genre.is_none() {
+                                            if let Some(genre) = self.genres().first().cloned() {
+                                                self.selected_genre = Some(genre);
+                                                self.update_filtered_tracks();
+                                            }
+                                        }
+                                    }
+                                }
+                                return Task::none();
+                            } else if self.active_focus == Some(ActiveFocus::SongSearch) {
+                                self.active_focus = Some(ActiveFocus::Tracklist);
+                                if self.selected_track.is_none() {
+                                    if let Some(track) = self.tracks.first().cloned() {
+                                        let cover_data = load_cover(&track.path);
+                                        let track = Track { cover_data, ..track };
+                                        self.selected_track = Some(track.clone());
+                                        self.selected_tracks = vec![track.clone()];
+                                        self.last_clicked_track = Some(track.clone());
+                                    }
+                                }
+                                return Task::none();
+                            }
                         }
                     }
                     Key::Named(Named::Space) => {
@@ -1799,6 +1866,7 @@ impl AppState {
                 self.selected_folder = None;
                 self.selected_artist = None;
                 self.selected_album = None;
+                self.active_focus = Some(ActiveFocus::SidebarList);
                 self.search_query.clear();
                 self.update_filtered_tracks();
                 Task::none()

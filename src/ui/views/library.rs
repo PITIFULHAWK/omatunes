@@ -49,11 +49,34 @@ fn folder_sidebar(state: &AppState) -> Element<'_, Message> {
             .padding([4, 8])
     };
 
-    let sidebar_search_input = text_input("Search...", &state.sidebar_search)
-        .on_input(Message::SidebarSearchChanged)
-        .padding(6)
-        .size(12)
-        .width(Length::Fill);
+    let sidebar_search_input: Element<'_, Message> = if !state.sidebar_search.is_empty() {
+        row![
+            text_input("Search...", &state.sidebar_search)
+                .on_input(Message::SidebarSearchChanged)
+                .padding(6)
+                .size(12)
+                .width(Length::Fill),
+            button(
+                text("\u{f00d}")
+                    .font(crate::ui::icons::NERD_FONT_MONO)
+                    .color(theme::red())
+                    .size(12)
+            )
+            .on_press(Message::SidebarSearchChanged(String::new()))
+            .style(iced::widget::button::text)
+            .padding(4)
+        ]
+        .align_y(Alignment::Center)
+        .spacing(4)
+        .into()
+    } else {
+        text_input("Search...", &state.sidebar_search)
+            .on_input(Message::SidebarSearchChanged)
+            .padding(6)
+            .size(12)
+            .width(Length::Fill)
+            .into()
+    };
 
     let tabs = row![
         tab_btn(ViewMode::Artists, "Artists"),
@@ -567,11 +590,35 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
     .style(iced::widget::button::text)
     .padding(4);
 
-    let song_search_input = text_input("Search songs...", &state.search_query)
-        .on_input(Message::SearchChanged)
-        .padding(6)
-        .size(12)
-        .width(Length::Fixed(300.0));
+    let song_search_input: Element<'_, Message> = if !state.search_query.is_empty() {
+        row![
+            text_input("Search songs...", &state.search_query)
+                .on_input(Message::SearchChanged)
+                .padding(6)
+                .size(12)
+                .width(Length::Fill),
+            button(
+                text("\u{f00d}")
+                    .font(crate::ui::icons::NERD_FONT_MONO)
+                    .color(theme::red())
+                    .size(12)
+            )
+            .on_press(Message::SearchChanged(String::new()))
+            .style(iced::widget::button::text)
+            .padding(4)
+        ]
+        .align_y(Alignment::Center)
+        .spacing(4)
+        .width(Length::Fixed(400.0))
+        .into()
+    } else {
+        text_input("Search songs...", &state.search_query)
+            .on_input(Message::SearchChanged)
+            .padding(6)
+            .size(12)
+            .width(Length::Fixed(400.0))
+            .into()
+    };
 
     let filter_options: Element<'_, Message> = if !state.search_query.is_empty() {
         container(
