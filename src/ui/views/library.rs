@@ -784,17 +784,82 @@ fn render_track_row(
         .align_y(Alignment::Center)
         .padding([5, 12]);
 
-    let styled = if is_selected_track {
-        container(track_row).style(|_| iced::widget::container::Style {
-            background: Some(iced::Background::Color(theme::surface0())),
-            border: iced::Border {
-                color: theme::accent(),
-                width: 1.0,
-                radius: 4.0.into(),
-            },
-            ..Default::default()
+    let current_idx = state.tracks.iter().position(|t| t.id == track.id);
+    let prev_selected = current_idx
+        .and_then(|idx| if idx > 0 { state.tracks.get(idx - 1) } else { None })
+        .map(|prev_t| {
+            let same_album = !grouped || prev_t.album == track.album;
+            same_album && state.selected_tracks.iter().any(|t| t.id == prev_t.id)
         })
-        .width(Length::Fill)
+        .unwrap_or(false);
+    let next_selected = current_idx
+        .and_then(|idx| state.tracks.get(idx + 1))
+        .map(|next_t| {
+            let same_album = !grouped || next_t.album == track.album;
+            same_album && state.selected_tracks.iter().any(|t| t.id == next_t.id)
+        })
+        .unwrap_or(false);
+
+    let styled = if is_selected_track {
+        let radius = iced::border::Radius {
+            top_left: if prev_selected { 0.0 } else { 4.0 },
+            top_right: if prev_selected { 0.0 } else { 4.0 },
+            bottom_left: if next_selected { 0.0 } else { 4.0 },
+            bottom_right: if next_selected { 0.0 } else { 4.0 },
+        };
+
+        let left_border = container(Space::new(Length::Fixed(1.0), Length::Fill))
+            .style(move |_| iced::widget::container::Style {
+                background: Some(iced::Background::Color(theme::accent())),
+                ..Default::default()
+            });
+
+        let right_border = container(Space::new(Length::Fixed(1.0), Length::Fill))
+            .style(move |_| iced::widget::container::Style {
+                background: Some(iced::Background::Color(theme::accent())),
+                ..Default::default()
+            });
+
+        let middle_row = row![
+            left_border,
+            container(track_row).width(Length::Fill),
+            right_border,
+        ]
+        .align_y(Alignment::Center);
+
+        let mut col = column![];
+
+        if !prev_selected {
+            let top_border = container(Space::new(Length::Fill, Length::Fixed(1.0)))
+                .style(move |_| iced::widget::container::Style {
+                    background: Some(iced::Background::Color(theme::accent())),
+                    ..Default::default()
+                });
+            col = col.push(top_border);
+        }
+
+        col = col.push(middle_row);
+
+        if !next_selected {
+            let bottom_border = container(Space::new(Length::Fill, Length::Fixed(1.0)))
+                .style(move |_| iced::widget::container::Style {
+                    background: Some(iced::Background::Color(theme::accent())),
+                    ..Default::default()
+                });
+            col = col.push(bottom_border);
+        }
+
+        container(col)
+            .style(move |_| iced::widget::container::Style {
+                background: Some(iced::Background::Color(theme::surface0())),
+                border: iced::Border {
+                    color: iced::Color::TRANSPARENT,
+                    width: 0.0,
+                    radius,
+                },
+                ..Default::default()
+            })
+            .width(Length::Fill)
     } else if is_current {
         container(track_row).style(theme::selected_row).width(Length::Fill)
     } else {
