@@ -56,14 +56,14 @@ fn read_or_default() -> Config {
             std::fs::create_dir_all(dir).ok();
         }
         std::fs::write(&path, DEFAULT_CONFIG).ok();
-        eprintln!("lavanda: configuração criada em {}", path.display());
+        eprintln!("omatunes: configuração criada em {}", path.display());
         return Config::default();
     }
 
     let content = match std::fs::read_to_string(&path) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("lavanda: erro ao ler config: {e}");
+            eprintln!("omatunes: erro ao ler config: {e}");
             return Config::default();
         }
     };
@@ -71,14 +71,14 @@ fn read_or_default() -> Config {
     match toml::from_str::<Config>(&content) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("lavanda: config inválida ({e}), usando padrões");
+            eprintln!("omatunes: config inválida ({e}), usando padrões");
             Config::default()
         }
     }
 }
 
 fn config_path() -> PathBuf {
-    expand_tilde("~/.config/lavanda/config.toml")
+    expand_tilde("~/.config/omatunes/config.toml")
 }
 
 fn expand_tilde(path: &str) -> PathBuf {
@@ -92,8 +92,8 @@ fn expand_tilde(path: &str) -> PathBuf {
 
 // ── Config padrão gerada na primeira execução ─────────────────────────────────
 
-const DEFAULT_CONFIG: &str = r#"# lavanda — configuration file
-# ~/.config/lavanda/config.toml
+const DEFAULT_CONFIG: &str = r#"# omatunes — configuration file
+# ~/.config/omatunes/config.toml
 #
 # All fields are optional. Missing fields use the defaults shown here.
 

@@ -24,6 +24,7 @@ pub fn scan_folder(dir: &Path) -> Vec<Track> {
     let mut pairs: Vec<(PathBuf, TrackInfo)> = WalkDir::new(dir)
         .follow_links(true)
         .into_iter()
+        .filter_entry(|e| !e.file_name().to_string_lossy().starts_with('.'))
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
         .filter_map(|entry| {
@@ -38,20 +39,33 @@ pub fn scan_folder(dir: &Path) -> Vec<Track> {
 
     pairs.sort_by(|(_, a), (_, b)| {
         a.album.cmp(&b.album)
+            .then(a.disc_number.cmp(&b.disc_number))
             .then(a.track_number.cmp(&b.track_number))
             .then(a.title.cmp(&b.title))
     });
 
-    pairs.into_iter().enumerate().map(|(i, (path, info))| Track {
-        id: (i + 1) as i64,
-        path,
-        title: info.title,
-        artist: info.artist,
-        album: info.album,
-        album_id: 0,
-        track_number: info.track_number,
-        duration: Duration::from_millis(info.duration_ms),
-        cover_data: None,
+    pairs.into_iter().enumerate().map(|(i, (path, info))| {
+        let (play_count, liked) = crate::db::get(|db| {
+            let pc = db.play_counts.get(&path).copied().unwrap_or(0);
+            let l = db.favorites.contains(&path);
+            (pc, l)
+        });
+        Track {
+            id: (i + 1) as i64,
+            path,
+            title: info.title,
+            artist: info.artist,
+            album: info.album,
+            album_id: 0,
+            track_number: info.track_number,
+            disc_number: info.disc_number,
+            duration: Duration::from_millis(info.duration_ms),
+            cover_data: None,
+            genre: info.genre,
+            play_count,
+            liked,
+            date_played: None,
+        }
     }).collect()
 }
 
@@ -77,7 +91,9 @@ struct TrackInfo {
     artist: String,
     album: String,
     track_number: Option<u32>,
+    disc_number: Option<u32>,
     duration_ms: u64,
+    genre: String,
 }
 
 fn read_tags(path: &Path) -> Result<TrackInfo> {
@@ -121,8 +137,14 @@ fn read_tags(path: &Path) -> Result<TrackInfo> {
         .unwrap_or(folder_album);
 
     let track_number = tags.and_then(|t| t.track());
+    let disc_number = tags.and_then(|t| t.disk());
 
-    Ok(TrackInfo { title, artist, album, track_number, duration_ms })
+    let genre = tags
+        .and_then(|t| t.genre())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| unknown.to_string());
+
+    Ok(TrackInfo { title, artist, album, track_number, disc_number, duration_ms, genre })
 }
 
 fn cover_from_folder(path: &Path) -> Option<Vec<u8>> {
@@ -134,3 +156,62 @@ fn cover_from_folder(path: &Path) -> Option<Vec<u8>> {
     }
     None
 }
+
+pub fn write_tags(
+    path: &Path,
+    title: &str,
+    artist: &str,
+    album: &str,
+    genre: &str,
+    track_number: Option<u32>,
+    disc_number: Option<u32>,
+    cover_path: Option<&str>,
+) -> Result<()> {
+    let mut tagged_file = Probe::open(path)?.read()?;
+    
+    // Get primary tag or create one from scratch
+    let mut tag = match tagged_file.primary_tag_mut() {
+        Some(t) => t.clone(),
+        None => lofty::tag::Tag::new(tagged_file.primary_tag_type()),
+    };
+    
+    tag.set_title(title.to_string());
+    tag.set_artist(artist.to_string());
+    tag.set_album(album.to_string());
+    tag.set_genre(genre.to_string());
+    if let Some(num) = track_number {
+        tag.set_track(num);
+    } else {
+        tag.remove_track();
+    }
+    if let Some(num) = disc_number {
+        tag.set_disk(num);
+    } else {
+        tag.remove_disk();
+    }
+    
+    if let Some(cp) = cover_path {
+        if let Ok(cover_data) = std::fs::read(cp) {
+            let mime = if cp.to_lowercase().ends_with(".png") {
+                "image/png".to_string()
+            } else {
+                "image/jpeg".to_string()
+            };
+            let picture = lofty::picture::Picture::new_unchecked(
+                lofty::picture::PictureType::CoverFront,
+                Some(lofty::picture::MimeType::Unknown(mime)),
+                None,
+                cover_data,
+            );
+            while !tag.pictures().is_empty() {
+                tag.remove_picture(0);
+            }
+            tag.push_picture(picture);
+        }
+    }
+    
+    tagged_file.insert_tag(tag);
+    tagged_file.save_to_path(path, Default::default())?;
+    Ok(())
+}
+

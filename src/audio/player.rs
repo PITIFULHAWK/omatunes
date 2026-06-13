@@ -20,6 +20,40 @@ use tokio::sync::mpsc;
 const OUTPUT_RATE: u32 = 48000;
 const OUTPUT_CHANNELS: u16 = 2;
 
+fn sync_system_volume(volume: f32) {
+    let vol_pct = format!("{}%", (volume * 100.0).round() as u32);
+    std::thread::spawn(move || {
+        for delay in &[10, 50, 150, 300, 600] {
+            std::thread::sleep(std::time::Duration::from_millis(*delay));
+            if let Ok(out) = std::process::Command::new("pactl").arg("list").arg("sink-inputs").output() {
+                let text = String::from_utf8_lossy(&out.stdout);
+                let mut current_id = None;
+                let mut found = false;
+                for line in text.lines() {
+                    let line = line.trim();
+                    if line.starts_with("Sink Input #") {
+                        if let Some(id_str) = line.strip_prefix("Sink Input #") {
+                            current_id = id_str.parse::<u32>().ok();
+                        }
+                    } else if line.contains("omatunes") {
+                        if let Some(id) = current_id {
+                            let _ = std::process::Command::new("pactl")
+                                .arg("set-sink-input-volume")
+                                .arg(id.to_string())
+                                .arg(&vol_pct)
+                                .spawn();
+                            found = true;
+                        }
+                    }
+                }
+                if found {
+                    break;
+                }
+            }
+        }
+    });
+}
+
 #[derive(Debug, Clone)]
 pub enum PlaybackState {
     Stopped,
@@ -109,17 +143,19 @@ fn audio_thread(
 
     let pcm_cb     = pcm.clone();
     let paused_cb  = paused.clone();
+    let vol_cb     = shared_vol.clone();
     let err_fn     = |e| eprintln!("Erro stream: {e}");
 
     let stream = match sample_format {
         SampleFormat::I16 => {
             let pcm2     = pcm.clone();
             let paused2  = paused.clone();
+            let vol2     = shared_vol.clone();
             device.build_output_stream(
                 &stream_config,
                 move |data: &mut [i16], _| {
                     let mut tmp = vec![0f32; data.len()];
-                    fill_output(&mut tmp, &pcm2, &paused2);
+                    fill_output(&mut tmp, &pcm2, &paused2, &vol2);
                     for (d, s) in data.iter_mut().zip(tmp.iter()) {
                         *d = cpal::Sample::from_sample(*s);
                     }
@@ -129,7 +165,7 @@ fn audio_thread(
         }
         _ => device.build_output_stream(
             &stream_config,
-            move |data: &mut [f32], _| fill_output(data, &pcm_cb, &paused_cb),
+            move |data: &mut [f32], _| fill_output(data, &pcm_cb, &paused_cb, &vol_cb),
             err_fn, None,
         ),
     };
@@ -181,7 +217,9 @@ fn audio_thread(
                 }
 
                 Some(AudioCommand::SetVolume(v)) => {
-                    *shared_vol.lock().unwrap() = v.clamp(0.0, 1.0);
+                    let clamped = v.clamp(0.0, 1.0);
+                    *shared_vol.lock().unwrap() = clamped;
+                    sync_system_volume(clamped);
                 }
 
                 Some(AudioCommand::Seek(pos)) => {
@@ -224,6 +262,9 @@ fn audio_thread(
                     let vol  = shared_vol.clone();
                     let flag = new_cancel;
 
+                    let vol_val = *vol.lock().unwrap();
+                    sync_system_volume(vol_val);
+
                     tokio::task::spawn_blocking(move || {
                         match decode_file(&path, pcm2, tx.clone(), vol, flag, None) {
                             Ok(true)  => { let _ = tx.send(AudioEvent::TrackEnded); }
@@ -243,14 +284,16 @@ fn fill_output(
     output: &mut [f32],
     pcm: &Arc<Mutex<VecDeque<f32>>>,
     paused: &Arc<AtomicBool>,
+    volume: &Arc<Mutex<f32>>,
 ) {
     if paused.load(Ordering::SeqCst) {
         for s in output.iter_mut() { *s = 0.0; }
         return;
     }
+    let vol = *volume.lock().unwrap();
     let mut buf = pcm.lock().unwrap();
     for sample in output.iter_mut() {
-        *sample = buf.pop_front().unwrap_or(0.0);
+        *sample = buf.pop_front().unwrap_or(0.0) * vol;
     }
 }
 
@@ -261,7 +304,7 @@ fn decode_file(
     path: &PathBuf,
     pcm: Arc<Mutex<VecDeque<f32>>>,
     event_tx: mpsc::UnboundedSender<AudioEvent>,
-    volume: Arc<Mutex<f32>>,
+    _volume: Arc<Mutex<f32>>,
     cancel: Arc<AtomicBool>,
     seek_to: Option<Duration>,
 ) -> Result<bool> {
@@ -335,15 +378,13 @@ fn decode_file(
         conv.copy_interleaved_ref(decoded);
         let raw = conv.samples();
 
-        // Lê volume atual (pode ter mudado desde o último packet)
-        let vol = *volume.lock().unwrap();
 
         let stereo: Vec<f32> = match n_channels {
-            1 => raw.iter().flat_map(|&s| [s * vol, s * vol]).collect(),
-            2 => raw.iter().map(|&s| s * vol).collect(),
+            1 => raw.iter().flat_map(|&s| [s, s]).collect(),
+            2 => raw.to_vec(),
             n => raw.chunks(n).flat_map(|ch| {
-                let l = ch.first().copied().unwrap_or(0.0) * vol;
-                let r = ch.get(1).copied().unwrap_or(0.0) * vol;
+                let l = ch.first().copied().unwrap_or(0.0);
+                let r = ch.get(1).copied().unwrap_or(0.0);
                 [l, r]
             }).collect(),
         };

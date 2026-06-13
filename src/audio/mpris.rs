@@ -9,6 +9,7 @@ pub enum MprisCommand {
     Next,
     Previous,
     Stop,
+    SetVolume(f64),
 }
 
 #[derive(Debug)]
@@ -39,8 +40,8 @@ pub fn launch(
         // e o zbus usa spawn_local para suas tasks D-Bus.
         let local = tokio::task::LocalSet::new();
         local.block_on(&rt, async move {
-            let player = match Player::builder("lavanda")
-                .identity("lavanda")
+            let player = match Player::builder("omatunes")
+                .identity("Omatunes")
                 .can_play(true)
                 .can_pause(true)
                 .can_go_next(true)
@@ -73,6 +74,9 @@ pub fn launch(
 
             let tx = cmd_tx.clone();
             player.connect_stop(move |_| { let _ = tx.send(MprisCommand::Stop); });
+
+            let tx = cmd_tx.clone();
+            player.connect_set_volume(move |_, v| { let _ = tx.send(MprisCommand::SetVolume(v)); });
 
             // Executa o loop D-Bus do player em paralelo com o loop de updates.
             // Sem isso, o player registra no D-Bus mas não processa nenhum comando.

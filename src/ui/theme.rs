@@ -44,7 +44,7 @@ impl Palette {
 fn palette_mutex() -> &'static Mutex<Palette> {
     PALETTE.get_or_init(|| {
         let p = try_load_omarchy_theme().unwrap_or_else(|| {
-            eprintln!("lavanda: tema Omarchy não encontrado, usando lavender padrão");
+            eprintln!("omatunes: tema Omarchy não encontrado, usando lavender padrão");
             Palette::default_lavender()
         });
         Mutex::new(p)
@@ -92,7 +92,7 @@ fn try_load_omarchy_theme() -> Option<Palette> {
         .or_else(|_| std::fs::read_to_string(&system_path))
         .ok()?;
 
-    eprintln!("lavanda: carregando tema \"{}\"", theme_name);
+    eprintln!("omatunes: carregando tema \"{}\"", theme_name);
     parse_colors_toml(&content)
 }
 
@@ -261,3 +261,34 @@ pub fn spectrum_bar_color(amplitude: f32) -> Color {
         lerp_color(accent(), red(), (amplitude - 0.5) * 2.0)
     }
 }
+
+// ── Estilos de Botão ──────────────────────────────────────────────────────────
+
+pub fn primary_button(_: &iced::Theme, status: iced::widget::button::Status) -> iced::widget::button::Style {
+    let is_hovered = status == iced::widget::button::Status::Hovered || status == iced::widget::button::Status::Pressed;
+    iced::widget::button::Style {
+        background: Some(iced::Background::Color(if is_hovered { lerp_color(accent(), text(), 0.15) } else { accent() })),
+        text_color: base(),
+        border: Border {
+            radius: 4.0.into(),
+            width: 0.0,
+            color: Color::TRANSPARENT,
+        },
+        ..Default::default()
+    }
+}
+
+pub fn secondary_button(_: &iced::Theme, status: iced::widget::button::Status) -> iced::widget::button::Style {
+    let is_hovered = status == iced::widget::button::Status::Hovered || status == iced::widget::button::Status::Pressed;
+    iced::widget::button::Style {
+        background: Some(iced::Background::Color(if is_hovered { surface0() } else { mantle() })),
+        text_color: text(),
+        border: Border {
+            radius: 4.0.into(),
+            width: 1.0,
+            color: surface0(),
+        },
+        ..Default::default()
+    }
+}
+

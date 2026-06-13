@@ -11,8 +11,13 @@ pub struct Track {
     pub album: String,
     pub album_id: i64,
     pub track_number: Option<u32>,
+    pub disc_number: Option<u32>,
     pub duration: Duration,
     pub cover_data: Option<Vec<u8>>,
+    pub genre: String,
+    pub play_count: u32,
+    pub liked: bool,
+    pub date_played: Option<String>,
 }
 
 impl Track {
