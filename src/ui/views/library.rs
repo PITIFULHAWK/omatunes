@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, mouse_area, row, scrollable, text, Space, checkbox, text_input};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, text, Space, checkbox, text_input, stack};
 use iced::{Alignment, Element, Length};
 
 use crate::app::{AppState, Message, ViewMode, SortColumn, PlaylistDialogMode};
@@ -37,16 +37,40 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
 
 fn folder_sidebar(state: &AppState) -> Element<'_, Message> {
     let tab_btn = |mode: ViewMode, label: &'static str| {
-        let is_active = state.view_mode == mode;
+        let is_active = state.view_mode == mode && state.selected_playlist.is_none();
         let btn_text = text(label)
             .size(11)
-            .font(crate::ui::icons::UI_FONT_BOLD)
-            .color(if is_active { theme::accent() } else { theme::subtext() });
+            .font(crate::ui::icons::UI_FONT_BOLD);
         
-        button(btn_text)
+        button(container(btn_text).center_x(Length::Fill).center_y(Length::Fill))
             .on_press(Message::SelectViewMode(mode))
-            .style(if is_active { iced::widget::button::secondary } else { iced::widget::button::text })
-            .padding([4, 8])
+            .width(Length::Fill)
+            .height(28.0)
+            .style(move |theme: &iced::Theme, status: iced::widget::button::Status| {
+                let is_hovered = status == iced::widget::button::Status::Hovered || status == iced::widget::button::Status::Pressed;
+                iced::widget::button::Style {
+                    background: Some(iced::Background::Color(if is_active {
+                        theme::mantle()
+                    } else if is_hovered {
+                        theme::surface0()
+                    } else {
+                        iced::Color::TRANSPARENT
+                    })),
+                    border: iced::Border {
+                        color: if is_active { theme::accent() } else { iced::Color::TRANSPARENT },
+                        width: if is_active { 1.0 } else { 0.0 },
+                        radius: iced::border::Radius {
+                            top_left: 4.0,
+                            top_right: 4.0,
+                            bottom_left: 0.0,
+                            bottom_right: 0.0,
+                        },
+                    },
+                    text_color: if is_active { theme::accent() } else { theme::subtext() },
+                    ..Default::default()
+                }
+            })
+            .padding(0)
     };
 
     let sidebar_clear_btn: Element<'_, Message> = if !state.sidebar_search.is_empty() {
@@ -80,8 +104,9 @@ fn folder_sidebar(state: &AppState) -> Element<'_, Message> {
         tab_btn(ViewMode::Albums, "Albums"),
         tab_btn(ViewMode::Genres, "Genres"),
     ]
-    .spacing(4)
-    .align_y(Alignment::Center);
+    .spacing(0)
+    .align_y(Alignment::Center)
+    .width(Length::Fill);
 
     let sidebar_items: Element<Message> = match state.view_mode {
         ViewMode::Artists => {
@@ -286,77 +311,92 @@ fn folder_sidebar(state: &AppState) -> Element<'_, Message> {
             .into()
     };
 
-
-
-    let is_liked_selected = state.selected_playlist.as_deref() == Some("Liked Songs");
-    let is_recent_selected = state.selected_playlist.as_deref() == Some("Recently Played");
-    let is_most_selected = state.selected_playlist.as_deref() == Some("Most Played");
-
-    let liked_btn = button(
-        text(crate::ui::icons::ICON_HEART)
-            .font(crate::ui::icons::NERD_FONT_MONO)
-            .size(18)
-            .color(if is_liked_selected { theme::accent() } else { theme::overlay0() })
-    )
-    .on_press(Message::SelectPlaylist("Liked Songs".to_string()))
-    .style(iced::widget::button::text)
-    .padding(2);
-
-    let recent_btn = button(
-        text("\u{f017}") // Clock
-            .font(crate::ui::icons::NERD_FONT_MONO)
-            .size(18)
-            .color(if is_recent_selected { theme::accent() } else { theme::overlay0() })
-    )
-    .on_press(Message::SelectPlaylist("Recently Played".to_string()))
-    .style(iced::widget::button::text)
-    .padding(2);
-
-    let most_btn = button(
-        text(crate::ui::icons::ICON_PODIUM)
-            .font(crate::ui::icons::NERD_FONT_MONO)
-            .size(18)
-            .color(if is_most_selected { theme::accent() } else { theme::overlay0() })
-    )
-    .on_press(Message::SelectPlaylist("Most Played".to_string()))
-    .style(iced::widget::button::text)
-    .padding(2);
-
-    let mut user_playlists_col = column![].spacing(2);
-    let custom_playlists = crate::db::get(|db| db.playlists.keys().cloned().collect::<Vec<String>>());
-    for name in custom_playlists {
-        user_playlists_col = user_playlists_col.push(render_playlist_item(name, false));
-    }
-
-    let compact_new_playlist_btn = button(
-        text("\u{f07b}\u{f067}") // folder plus icon Nerd Font
-            .font(crate::ui::icons::NERD_FONT_MONO)
-            .size(14)
-            .color(theme::accent())
-    )
-    .on_press(Message::OpenPlaylistDialog(PlaylistDialogMode::Create))
-    .style(iced::widget::button::text)
-    .padding(2);
-
-    let playlists_header = row![
-        text("Playlists")
-            .color(theme::subtext())
+    let playlist_tab_btn = |tab: crate::app::PlaylistTab, label: &'static str| {
+        let is_active = state.playlist_tab == tab && state.selected_playlist.is_some();
+        let btn_text = text(label)
             .size(11)
-            .font(crate::ui::icons::UI_FONT_BOLD),
-        Space::with_width(Length::Fill),
-        row![
-            liked_btn,
-            Space::with_width(12),
-            recent_btn,
-            Space::with_width(12),
-            most_btn,
-        ]
-        .align_y(Alignment::Center),
-        Space::with_width(Length::Fill),
-        compact_new_playlist_btn,
+            .font(crate::ui::icons::UI_FONT_BOLD);
+        
+        button(container(btn_text).center_x(Length::Fill).center_y(Length::Fill))
+            .on_press(Message::SelectPlaylistTab(tab))
+            .width(Length::Fill)
+            .height(28.0)
+            .style(move |theme: &iced::Theme, status: iced::widget::button::Status| {
+                let is_hovered = status == iced::widget::button::Status::Hovered || status == iced::widget::button::Status::Pressed;
+                iced::widget::button::Style {
+                    background: Some(iced::Background::Color(if is_active {
+                        theme::mantle()
+                    } else if is_hovered {
+                        theme::surface0()
+                    } else {
+                        iced::Color::TRANSPARENT
+                    })),
+                    border: iced::Border {
+                        color: if is_active { theme::accent() } else { iced::Color::TRANSPARENT },
+                        width: if is_active { 1.0 } else { 0.0 },
+                        radius: iced::border::Radius {
+                            top_left: 4.0,
+                            top_right: 4.0,
+                            bottom_left: 0.0,
+                            bottom_right: 0.0,
+                        },
+                    },
+                    text_color: if is_active { theme::accent() } else { theme::subtext() },
+                    ..Default::default()
+                }
+            })
+            .padding(0)
+    };
+
+    let playlist_tabs = row![
+        playlist_tab_btn(crate::app::PlaylistTab::Playlists, "User Playlists"),
+        playlist_tab_btn(crate::app::PlaylistTab::Autoplaylists, "Autoplaylists"),
     ]
+    .spacing(0)
     .align_y(Alignment::Center)
-    .padding([0, 4]);
+    .width(Length::Fill);
+
+    let mut playlists_area_col = column![].spacing(6).height(Length::Fill);
+    
+    if state.playlist_tab == crate::app::PlaylistTab::Playlists {
+        let mut user_playlists_col = column![].spacing(2);
+        let custom_playlists = crate::db::get(|db| db.playlists.keys().cloned().collect::<Vec<String>>());
+        
+        for name in custom_playlists {
+            user_playlists_col = user_playlists_col.push(render_playlist_item(name, false));
+        }
+        
+        playlists_area_col = playlists_area_col.push(
+            container(scrollable(user_playlists_col))
+                .height(Length::Fill)
+        );
+
+        let add_playlist_btn = button(
+            container(
+                row![
+                    text("\u{f07b}\u{f067}").font(crate::ui::icons::NERD_FONT_MONO).size(11),
+                    Space::with_width(6),
+                    text("New Playlist").size(11).font(crate::ui::icons::UI_FONT_BOLD)
+                ].align_y(Alignment::Center)
+            ).center_x(Length::Fill)
+        )
+        .on_press(Message::OpenPlaylistDialog(PlaylistDialogMode::Create))
+        .style(theme::secondary_button)
+        .padding([4, 12])
+        .width(Length::Fill);
+
+        playlists_area_col = playlists_area_col.push(add_playlist_btn);
+    } else {
+        let mut auto_playlists_col = column![].spacing(2);
+        auto_playlists_col = auto_playlists_col.push(render_playlist_item("Liked Songs".to_string(), true));
+        auto_playlists_col = auto_playlists_col.push(render_playlist_item("Recently Played".to_string(), true));
+        auto_playlists_col = auto_playlists_col.push(render_playlist_item("Most Played".to_string(), true));
+
+        playlists_area_col = playlists_area_col.push(
+            container(scrollable(auto_playlists_col))
+                .height(Length::Fill)
+        );
+    }
 
     let playlist_drag_handle = mouse_area(
         container(
@@ -408,11 +448,11 @@ fn folder_sidebar(state: &AppState) -> Element<'_, Message> {
             Space::with_height(8),
             container(
                 column![
-                    playlists_header,
-                    Space::with_height(8),
-                    container(scrollable(user_playlists_col))
-                        .height(Length::Fill),
+                    playlist_tabs,
+                    Space::with_height(6),
+                    playlists_area_col,
                 ]
+                .height(Length::Fill)
             )
             .height(Length::Fixed(state.playlist_height)),
         ]
@@ -442,8 +482,18 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
         .into();
     }
 
-    let header_btn = |col: SortColumn, label: &str, width: Length| {
-        let is_sorted = state.sort_column == Some(col);
+    let is_recently_played = state.selected_playlist.as_deref() == Some("Recently Played");
+    let group_by_album = state.group_by_album && !is_recently_played;
+
+    let table_columns = crate::db::get(|db| db.table_columns.clone());
+    let mut header_widgets: Vec<Element<'_, Message>> = Vec::new();
+    
+    for &col in &table_columns {
+        let label = col.label();
+        let width = col_width(col);
+        let sort_col = col_to_sort_col(col);
+        
+        let is_sorted = state.sort_column == Some(sort_col);
         let arrow = if is_sorted {
             if state.sort_ascending { " ▲" } else { " ▼" }
         } else {
@@ -454,65 +504,26 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
             .font(crate::ui::icons::UI_FONT_BOLD)
             .color(if is_sorted { theme::accent() } else { theme::subtext() });
             
-        button(txt)
-            .on_press(Message::SortBy(col))
+        let btn = button(txt)
+            .on_press(Message::SortBy(sort_col))
             .style(iced::widget::button::text)
             .padding(0)
-            .width(width)
-    };
+            .width(width);
 
-    let is_recently_played = state.selected_playlist.as_deref() == Some("Recently Played");
-    let group_by_album = state.group_by_album && !is_recently_played;
+        let header_area = mouse_area(btn)
+            .on_right_press(Message::ToggleContextMenu(Some(crate::app::ContextMenuTarget::Header(col))));
 
-    let table_headers = if is_recently_played {
-        container(
-            row![
-                header_btn(SortColumn::TrackNumber, "#", Length::Fixed(30.0)),
-                header_btn(SortColumn::Title, "Title", Length::FillPortion(3)),
-                header_btn(SortColumn::Artist, "Artist", Length::FillPortion(2)),
-                text("Date Played")
-                    .size(11)
-                    .font(crate::ui::icons::UI_FONT_BOLD)
-                    .color(theme::subtext())
-                    .width(Length::FillPortion(2)),
-                header_btn(SortColumn::Duration, "Duration", Length::Fixed(60.0)),
-                header_btn(SortColumn::Plays, "Plays", Length::Fixed(40.0)),
-                Space::with_width(120),
-            ]
-            .spacing(12)
-            .align_y(Alignment::Center)
-            .padding([8, 12])
-        )
-    } else if group_by_album {
-        container(
-            row![
-                header_btn(SortColumn::TrackNumber, "#", Length::Fixed(30.0)),
-                header_btn(SortColumn::Title, "Title", Length::FillPortion(3)),
-                header_btn(SortColumn::Artist, "Artist", Length::FillPortion(2)),
-                header_btn(SortColumn::Duration, "Duration", Length::Fixed(60.0)),
-                header_btn(SortColumn::Plays, "Plays", Length::Fixed(40.0)),
-                Space::with_width(120),
-            ]
-            .spacing(12)
-            .align_y(Alignment::Center)
-            .padding([8, 12])
-        )
-    } else {
-        container(
-            row![
-                header_btn(SortColumn::TrackNumber, "#", Length::Fixed(30.0)),
-                header_btn(SortColumn::Title, "Title", Length::FillPortion(3)),
-                header_btn(SortColumn::Artist, "Artist", Length::FillPortion(2)),
-                header_btn(SortColumn::Album, "Album", Length::FillPortion(2)),
-                header_btn(SortColumn::Duration, "Duration", Length::Fixed(60.0)),
-                header_btn(SortColumn::Plays, "Plays", Length::Fixed(40.0)),
-                Space::with_width(120),
-            ]
-            .spacing(12)
-            .align_y(Alignment::Center)
-            .padding([8, 12])
-        )
+        header_widgets.push(header_area.into());
     }
+
+    header_widgets.push(Space::with_width(120).into());
+
+    let table_headers = container(
+        row(header_widgets)
+            .spacing(12)
+            .align_y(Alignment::Center)
+            .padding([8, 12])
+    )
     .style(|_| iced::widget::container::Style {
         background: Some(iced::Background::Color(theme::mantle())),
         border: iced::Border {
@@ -573,7 +584,7 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
         }
     }
 
-    let tracklist_scroll = mouse_area(scrollable(column(rows).spacing(1)).id(scrollable::Id::new("tracklist_scroll")))
+    let tracklist_scroll = mouse_area(scrollable(column(rows).spacing(0)).id(scrollable::Id::new("tracklist_scroll")))
         .on_enter(Message::HoverTracklist(true))
         .on_exit(Message::HoverTracklist(false));
 
@@ -690,9 +701,6 @@ fn render_track_row(
     let is_selected_track = state.selected_tracks.iter().any(|t| t.id == track.id);
     let row_color = if is_current { theme::accent() } else { theme::text() };
 
-    let num = track.track_number
-        .map(|n| n.to_string())
-        .unwrap_or_else(|| "·".to_string());
 
     let like_color = if track.liked { theme::red() } else { theme::overlay0() };
     let like_btn = button(
@@ -710,7 +718,7 @@ fn render_track_row(
             .color(theme::overlay0())
             .size(13)
     )
-    .on_press(Message::OpenTagEditor(track.clone()))
+    .on_press(Message::OpenTagEditor(vec![track.clone()]))
     .style(iced::widget::button::text);
 
     let mut track_no_cover = track.clone();
@@ -725,55 +733,51 @@ fn render_track_row(
     .on_press(Message::OpenPlaylistDialog(PlaylistDialogMode::AddTrack(track_no_cover.clone())))
     .style(iced::widget::button::text);
 
-    let mut track_row_widgets = vec![
-        text(num)
-            .color(theme::overlay0())
-            .size(13)
-            .width(30)
-            .into(),
-        text(track.title.clone())
-            .color(row_color)
-            .size(14)
-            .width(Length::FillPortion(3))
-            .into(),
-        text(track.artist.clone())
-            .color(theme::subtext())
-            .size(13)
-            .width(Length::FillPortion(2))
-            .into(),
-    ];
+    let table_columns = crate::db::get(|db| db.table_columns.clone());
+    let mut track_row_widgets: Vec<Element<'static, Message>> = Vec::new();
 
-    let is_recently_played = state.selected_playlist.as_deref() == Some("Recently Played");
-    if is_recently_played {
-        let date_str = track.date_played.clone().unwrap_or_default();
-        track_row_widgets.push(
-            text(date_str)
-                .color(theme::subtext())
-                .size(13)
-                .width(Length::FillPortion(2))
-                .into()
-        );
-    } else if !grouped {
-        track_row_widgets.push(
-            text(track.album.clone())
-                .color(theme::subtext())
-                .size(13)
-                .width(Length::FillPortion(2))
-                .into()
-        );
+    for col in table_columns {
+        let width = col_width(col);
+        let el: Element<'static, Message> = match col {
+            crate::db::TableColumn::TrackNumber => {
+                let num_str = track.track_number.map(|n| n.to_string()).unwrap_or_else(|| "·".to_string());
+                text(num_str).color(theme::overlay0()).size(13).width(width).into()
+            }
+            crate::db::TableColumn::Title => {
+                text(track.title.clone()).color(row_color).size(14).width(width).into()
+            }
+            crate::db::TableColumn::Artist => {
+                text(track.artist.clone()).color(theme::subtext()).size(13).width(width).into()
+            }
+            crate::db::TableColumn::Album => {
+                text(track.album.clone()).color(theme::subtext()).size(13).width(width).into()
+            }
+            crate::db::TableColumn::Genre => {
+                text(track.genre.clone()).color(theme::subtext()).size(13).width(width).into()
+            }
+            crate::db::TableColumn::Year => {
+                let yr_str = track.year.map(|y| y.to_string()).unwrap_or_else(|| "·".to_string());
+                text(yr_str).color(theme::subtext()).size(13).width(width).into()
+            }
+            crate::db::TableColumn::DiscNumber => {
+                let dc_str = track.disc_number.map(|d| d.to_string()).unwrap_or_else(|| "·".to_string());
+                text(dc_str).color(theme::subtext()).size(13).width(width).into()
+            }
+            crate::db::TableColumn::Duration => {
+                text(track.duration_str()).color(theme::subtext()).size(13).width(width).into()
+            }
+            crate::db::TableColumn::Plays => {
+                text(track.play_count.to_string()).color(theme::subtext()).size(13).width(width).into()
+            }
+            crate::db::TableColumn::DatePlayed => {
+                let dp_str = track.date_played.clone().unwrap_or_else(|| "·".to_string());
+                text(dp_str).color(theme::subtext()).size(13).width(width).into()
+            }
+        };
+        track_row_widgets.push(el);
     }
 
     track_row_widgets.extend(vec![
-        text(track.duration_str())
-            .color(theme::subtext())
-            .size(13)
-            .width(60)
-            .into(),
-        text(track.play_count.to_string())
-            .color(theme::subtext())
-            .size(13)
-            .width(40)
-            .into(),
         like_btn.into(),
         edit_btn.into(),
         add_playlist_btn.into(),
@@ -808,49 +812,10 @@ fn render_track_row(
             bottom_right: if next_selected { 0.0 } else { 4.0 },
         };
 
-        let left_border = container(Space::new(Length::Fixed(1.0), Length::Fill))
-            .style(move |_| iced::widget::container::Style {
-                background: Some(iced::Background::Color(theme::accent())),
-                ..Default::default()
-            });
-
-        let right_border = container(Space::new(Length::Fixed(1.0), Length::Fill))
-            .style(move |_| iced::widget::container::Style {
-                background: Some(iced::Background::Color(theme::accent())),
-                ..Default::default()
-            });
-
-        let middle_row = row![
-            left_border,
-            container(track_row).width(Length::Fill),
-            right_border,
-        ]
-        .align_y(Alignment::Center);
-
-        let mut col = column![];
-
-        if !prev_selected {
-            let top_border = container(Space::new(Length::Fill, Length::Fixed(1.0)))
-                .style(move |_| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(theme::accent())),
-                    ..Default::default()
-                });
-            col = col.push(top_border);
-        }
-
-        col = col.push(middle_row);
-
-        if !next_selected {
-            let bottom_border = container(Space::new(Length::Fill, Length::Fixed(1.0)))
-                .style(move |_| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(theme::accent())),
-                    ..Default::default()
-                });
-            col = col.push(bottom_border);
-        }
-
-        container(col)
-            .style(move |_| iced::widget::container::Style {
+        // Base container with background
+        let content_container = container(track_row)
+            .width(Length::Fill)
+            .style(move |_: &iced::Theme| iced::widget::container::Style {
                 background: Some(iced::Background::Color(theme::surface0())),
                 border: iced::Border {
                     color: iced::Color::TRANSPARENT,
@@ -858,8 +823,83 @@ fn render_track_row(
                     radius,
                 },
                 ..Default::default()
-            })
+            });
+
+        // Left border overlay
+        let left_border_overlay = container(
+            container(Space::new(Length::Fixed(1.0), Length::Fill))
+                .style(move |_: &iced::Theme| iced::widget::container::Style {
+                    background: Some(iced::Background::Color(theme::accent())),
+                    ..Default::default()
+                })
+                .width(1.0)
+                .height(Length::Fill)
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(iced::Padding { top: 0.0, right: 0.0, bottom: 0.0, left: 1.0 })
+        .align_x(iced::alignment::Horizontal::Left);
+
+        // Right border overlay
+        let right_border_overlay = container(
+            container(Space::new(Length::Fixed(1.0), Length::Fill))
+                .style(move |_: &iced::Theme| iced::widget::container::Style {
+                    background: Some(iced::Background::Color(theme::accent())),
+                    ..Default::default()
+                })
+                .width(1.0)
+                .height(Length::Fill)
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(iced::Padding { top: 0.0, right: 1.0, bottom: 0.0, left: 0.0 })
+        .align_x(iced::alignment::Horizontal::Right);
+
+        let mut s = stack![
+            content_container,
+            left_border_overlay,
+            right_border_overlay,
+        ]
+        .width(Length::Fill)
+        .height(Length::Shrink);
+
+        if !prev_selected {
+            let top_border = container(
+                container(Space::new(Length::Fill, Length::Fixed(1.0)))
+                    .style(move |_: &iced::Theme| iced::widget::container::Style {
+                        background: Some(iced::Background::Color(theme::accent())),
+                        ..Default::default()
+                    })
+                    .width(Length::Fill)
+                    .height(1.0)
+            )
             .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(iced::Padding { top: 1.0, right: 0.0, bottom: 0.0, left: 0.0 })
+            .align_y(iced::alignment::Vertical::Top);
+            
+            s = s.push(top_border);
+        }
+
+        if !next_selected {
+            let bottom_border = container(
+                container(Space::new(Length::Fill, Length::Fixed(1.0)))
+                    .style(move |_: &iced::Theme| iced::widget::container::Style {
+                        background: Some(iced::Background::Color(theme::accent())),
+                        ..Default::default()
+                    })
+                    .width(Length::Fill)
+                    .height(1.0)
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(iced::Padding { top: 0.0, right: 0.0, bottom: 2.0, left: 0.0 })
+            .align_y(iced::alignment::Vertical::Bottom);
+            
+            s = s.push(bottom_border);
+        }
+
+        container(s).width(Length::Fill)
     } else if is_current {
         container(track_row).style(theme::selected_row).width(Length::Fill)
     } else {
@@ -881,4 +921,34 @@ fn render_track_row(
     mouse_area(select_btn)
         .on_right_press(Message::ToggleContextMenu(Some(row_target)))
         .into()
+}
+
+fn col_width(col: crate::db::TableColumn) -> Length {
+    match col {
+        crate::db::TableColumn::TrackNumber => Length::Fixed(30.0),
+        crate::db::TableColumn::Title => Length::FillPortion(3),
+        crate::db::TableColumn::Artist => Length::FillPortion(2),
+        crate::db::TableColumn::Album => Length::FillPortion(2),
+        crate::db::TableColumn::Genre => Length::FillPortion(2),
+        crate::db::TableColumn::Year => Length::Fixed(50.0),
+        crate::db::TableColumn::DiscNumber => Length::Fixed(50.0),
+        crate::db::TableColumn::Duration => Length::Fixed(60.0),
+        crate::db::TableColumn::Plays => Length::Fixed(40.0),
+        crate::db::TableColumn::DatePlayed => Length::FillPortion(2),
+    }
+}
+
+fn col_to_sort_col(col: crate::db::TableColumn) -> SortColumn {
+    match col {
+        crate::db::TableColumn::TrackNumber => SortColumn::TrackNumber,
+        crate::db::TableColumn::Title => SortColumn::Title,
+        crate::db::TableColumn::Artist => SortColumn::Artist,
+        crate::db::TableColumn::Album => SortColumn::Album,
+        crate::db::TableColumn::Genre => SortColumn::Genre,
+        crate::db::TableColumn::Year => SortColumn::Year,
+        crate::db::TableColumn::DiscNumber => SortColumn::DiscNumber,
+        crate::db::TableColumn::Duration => SortColumn::Duration,
+        crate::db::TableColumn::Plays => SortColumn::Plays,
+        crate::db::TableColumn::DatePlayed => SortColumn::DatePlayed,
+    }
 }

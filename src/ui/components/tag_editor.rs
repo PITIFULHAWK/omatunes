@@ -4,7 +4,55 @@ use iced::{Alignment, Element, Length};
 use crate::app::{Message, TagEditorState};
 use crate::ui::theme;
 
-pub fn view(state: &TagEditorState) -> Element<'static, Message> {
+fn get_suggestions(query: &str, items: &[String]) -> Vec<String> {
+    let query_lower = query.trim().to_lowercase();
+    if query_lower.is_empty() {
+        return Vec::new();
+    }
+    let mut matches = Vec::new();
+    for item in items {
+        let item_trimmed = item.trim();
+        let item_lower = item_trimmed.to_lowercase();
+        if item_lower.starts_with(&query_lower) && item_lower != query_lower {
+            matches.push(item_trimmed.to_string());
+        }
+    }
+    matches.sort();
+    matches.dedup();
+    matches.truncate(4);
+    matches
+}
+
+fn render_suggestions(
+    suggestions: &[String],
+    on_select: impl Fn(String) -> Message,
+) -> Element<'static, Message> {
+    let mut col = column![].spacing(4);
+    for chunk in suggestions.chunks(2) {
+        let mut row_el = row![].spacing(6);
+        for suggestion in chunk {
+            row_el = row_el.push(
+                button(
+                    text(suggestion.clone())
+                        .size(10)
+                        .color(theme::accent())
+                )
+                .on_press(on_select(suggestion.clone()))
+                .style(theme::secondary_button)
+                .padding([2, 6])
+            );
+        }
+        col = col.push(row_el);
+    }
+    col.into()
+}
+
+pub fn view(
+    state: &TagEditorState,
+    unique_artists: &[String],
+    unique_albums: &[String],
+    unique_genres: &[String],
+) -> Element<'static, Message> {
     let title_input = text_input("Title", &state.title)
         .on_input(Message::UpdateTagFieldTitle)
         .padding(8);
@@ -29,47 +77,143 @@ pub fn view(state: &TagEditorState) -> Element<'static, Message> {
         .on_input(Message::UpdateTagFieldDiscNumber)
         .padding(8);
 
+    let year_input = text_input("Year", &state.year)
+        .on_input(Message::UpdateTagFieldYear)
+        .padding(8);
+
     let cover_path_val = state.cover_path.clone().unwrap_or_default();
     let cover_input = text_input("Cover Image Path (jpg/png)", &cover_path_val)
         .on_input(Message::UpdateTagFieldCoverPath)
         .padding(8);
 
     let apply_to_album_checkbox = checkbox(
-        "Apply changes (Album, Genre, Cover) to entire album",
+        "Apply changes (ticked fields) to entire album",
         state.apply_to_album,
     )
     .on_toggle(Message::UpdateTagFieldApplyToAlbum)
     .size(16);
 
-    let content = column![
+    let artist_suggestions = get_suggestions(&state.artist, unique_artists);
+    let album_suggestions = get_suggestions(&state.album, unique_albums);
+    let genre_suggestions = get_suggestions(&state.genre, unique_genres);
+
+    let mut content = column![
         text("Edit ID3 Tags")
             .size(18)
             .font(crate::ui::icons::UI_FONT_BOLD)
             .color(theme::accent()),
         Space::with_height(12),
-        text("Title").size(12).color(theme::subtext()),
-        title_input,
-        Space::with_height(8),
-        text("Artist").size(12).color(theme::subtext()),
-        artist_input,
-        Space::with_height(8),
-        text("Album").size(12).color(theme::subtext()),
-        album_input,
-        Space::with_height(8),
-        text("Genre").size(12).color(theme::subtext()),
-        genre_input,
-        Space::with_height(8),
+        
         row![
+            checkbox("", state.apply_title)
+                .on_toggle(Message::ToggleTagFieldApplyTitle)
+                .size(16),
             column![
-                text("Track #").size(12).color(theme::subtext()),
-                track_num_input
-            ].width(Length::FillPortion(1)),
-            Space::with_width(12),
+                text("Title").size(12).color(theme::subtext()),
+                title_input
+            ].width(Length::Fill)
+        ].align_y(Alignment::Center).spacing(8),
+        
+        Space::with_height(8),
+        
+        row![
+            checkbox("", state.apply_artist)
+                .on_toggle(Message::ToggleTagFieldApplyArtist)
+                .size(16),
             column![
-                text("Disc #").size(12).color(theme::subtext()),
-                disc_num_input
-            ].width(Length::FillPortion(1)),
+                text("Artist").size(12).color(theme::subtext()),
+                artist_input,
+                if !artist_suggestions.is_empty() {
+                    iced::Element::from(column![
+                        Space::with_height(4),
+                        render_suggestions(&artist_suggestions, Message::UpdateTagFieldArtist)
+                    ])
+                } else {
+                    iced::Element::from(Space::with_height(0))
+                }
+            ].width(Length::Fill)
+        ].align_y(Alignment::Center).spacing(8),
+        
+        Space::with_height(8),
+        
+        row![
+            checkbox("", state.apply_album)
+                .on_toggle(Message::ToggleTagFieldApplyAlbum)
+                .size(16),
+            column![
+                text("Album").size(12).color(theme::subtext()),
+                album_input,
+                if !album_suggestions.is_empty() {
+                    iced::Element::from(column![
+                        Space::with_height(4),
+                        render_suggestions(&album_suggestions, Message::UpdateTagFieldAlbum)
+                    ])
+                } else {
+                    iced::Element::from(Space::with_height(0))
+                }
+            ].width(Length::Fill)
+        ].align_y(Alignment::Center).spacing(8),
+        
+        Space::with_height(8),
+        
+        row![
+            checkbox("", state.apply_genre)
+                .on_toggle(Message::ToggleTagFieldApplyGenre)
+                .size(16),
+            column![
+                text("Genre").size(12).color(theme::subtext()),
+                genre_input,
+                if !genre_suggestions.is_empty() {
+                    iced::Element::from(column![
+                        Space::with_height(4),
+                        render_suggestions(&genre_suggestions, Message::UpdateTagFieldGenre)
+                    ])
+                } else {
+                    iced::Element::from(Space::with_height(0))
+                }
+            ].width(Length::Fill)
+        ].align_y(Alignment::Center).spacing(8),
+        
+        Space::with_height(8),
+        
+        row![
+            row![
+                checkbox("", state.apply_track_num)
+                    .on_toggle(Message::ToggleTagFieldApplyTrackNum)
+                    .size(16),
+                column![
+                    text("Track #").size(12).color(theme::subtext()),
+                    track_num_input
+                ].width(Length::Fill)
+            ].align_y(Alignment::Center).spacing(8).width(Length::FillPortion(1)),
             Space::with_width(12),
+            row![
+                checkbox("", state.apply_disc_num)
+                    .on_toggle(Message::ToggleTagFieldApplyDiscNum)
+                    .size(16),
+                column![
+                    text("Disc #").size(12).color(theme::subtext()),
+                    disc_num_input
+                ].width(Length::Fill)
+            ].align_y(Alignment::Center).spacing(8).width(Length::FillPortion(1)),
+            Space::with_width(12),
+            row![
+                checkbox("", state.apply_year)
+                    .on_toggle(Message::ToggleTagFieldApplyYear)
+                    .size(16),
+                column![
+                    text("Year").size(12).color(theme::subtext()),
+                    year_input
+                ].width(Length::Fill)
+            ].align_y(Alignment::Center).spacing(8).width(Length::FillPortion(1)),
+        ],
+        
+        Space::with_height(8),
+        
+        row![
+            checkbox("", state.apply_cover)
+                .on_toggle(Message::ToggleTagFieldApplyCover)
+                .size(16),
             column![
                 row![
                     text("Cover Path").size(12).color(theme::subtext()),
@@ -80,11 +224,19 @@ pub fn view(state: &TagEditorState) -> Element<'static, Message> {
                         .padding([2, 6])
                 ].align_y(Alignment::Center),
                 cover_input
-            ].width(Length::FillPortion(2))
-        ],
-        Space::with_height(12),
-        apply_to_album_checkbox,
-        Space::with_height(16),
+            ].width(Length::Fill)
+        ].align_y(Alignment::Center).spacing(8),
+        
+        Space::with_height(12)
+    ]
+    .spacing(4)
+    .padding(24)
+    .width(500);
+
+    content = content.push(apply_to_album_checkbox);
+    content = content.push(Space::with_height(16));
+
+    content = content.push(
         row![
             button(text("Cancel").color(theme::text()))
                 .on_press(Message::CloseTagEditor)
@@ -97,10 +249,7 @@ pub fn view(state: &TagEditorState) -> Element<'static, Message> {
                 .style(theme::primary_button)
         ]
         .align_y(Alignment::Center)
-    ]
-    .spacing(4)
-    .padding(24)
-    .width(450);
+    );
 
     // Modal background overlay
     container(

@@ -31,7 +31,7 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
         let song_btn = button(
             text(title_text)
                 .color(title_style)
-                .size(20)
+                .size(24)
                 .font(iced::Font {
                     weight: iced::font::Weight::Bold,
                     ..crate::ui::icons::UI_FONT
@@ -44,7 +44,7 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
         let artist_btn = button(
             text(&track.artist)
                 .color(theme::subtext())
-                .size(13)
+                .size(16)
         )
         .on_press(Message::FocusArtistName)
         .style(iced::widget::button::text)
@@ -54,7 +54,7 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
         let album_btn = button(
             text(album_label)
                 .color(theme::subtext())
-                .size(13)
+                .size(16)
         )
         .on_press(Message::FocusAlbumName)
         .style(iced::widget::button::text)
@@ -77,8 +77,8 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
     // Album cover (Click returns to active source)
     let cover_art: Element<Message> = if let Some(handle) = state.get_display_cover() {
         image(handle)
-            .width(180)
-            .height(180)
+            .width(216)
+            .height(216)
             .content_fit(iced::ContentFit::Cover)
             .into()
     } else {
@@ -86,10 +86,10 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
             text(icons::ICON_MUSIC)
                 .font(icons::NERD_FONT_MONO)
                 .color(theme::overlay0())
-                .size(48),
+                .size(58),
         )
-        .width(180)
-        .height(180)
+        .width(216)
+        .height(216)
         .align_x(iced::alignment::Horizontal::Center)
         .align_y(iced::alignment::Vertical::Center)
         .style(theme::card)

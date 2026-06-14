@@ -15,6 +15,7 @@ pub struct Track {
     pub duration: Duration,
     pub cover_data: Option<Vec<u8>>,
     pub genre: String,
+    pub year: Option<u32>,
     pub play_count: u32,
     pub liked: bool,
     pub date_played: Option<String>,

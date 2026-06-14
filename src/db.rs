@@ -6,7 +6,64 @@ use serde::{Deserialize, Serialize};
 
 static DB: std::sync::OnceLock<Mutex<OmatunesDb>> = std::sync::OnceLock::new();
 
-#[derive(Serialize, Deserialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TableColumn {
+    TrackNumber,
+    Title,
+    Artist,
+    Album,
+    Genre,
+    Year,
+    DiscNumber,
+    Duration,
+    Plays,
+    DatePlayed,
+}
+
+impl TableColumn {
+    pub fn all() -> &'static [TableColumn] {
+        &[
+            TableColumn::TrackNumber,
+            TableColumn::Title,
+            TableColumn::Artist,
+            TableColumn::Album,
+            TableColumn::Genre,
+            TableColumn::Year,
+            TableColumn::DiscNumber,
+            TableColumn::Duration,
+            TableColumn::Plays,
+            TableColumn::DatePlayed,
+        ]
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            TableColumn::TrackNumber => "#",
+            TableColumn::Title => "Title",
+            TableColumn::Artist => "Artist",
+            TableColumn::Album => "Album",
+            TableColumn::Genre => "Genre",
+            TableColumn::Year => "Year",
+            TableColumn::DiscNumber => "Disc #",
+            TableColumn::Duration => "Duration",
+            TableColumn::Plays => "Plays",
+            TableColumn::DatePlayed => "Date Played",
+        }
+    }
+}
+
+fn default_table_columns() -> Vec<TableColumn> {
+    vec![
+        TableColumn::TrackNumber,
+        TableColumn::Title,
+        TableColumn::Artist,
+        TableColumn::Album,
+        TableColumn::Duration,
+        TableColumn::Plays,
+    ]
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct OmatunesDb {
     pub favorites: HashSet<PathBuf>,
     pub play_counts: HashMap<PathBuf, u32>,
@@ -15,6 +72,21 @@ pub struct OmatunesDb {
     pub recently_played: Vec<(PathBuf, String)>,
     #[serde(default)]
     pub hidden_artists_albums: Vec<(String, bool)>,
+    #[serde(default = "default_table_columns")]
+    pub table_columns: Vec<TableColumn>,
+}
+
+impl Default for OmatunesDb {
+    fn default() -> Self {
+        OmatunesDb {
+            favorites: HashSet::default(),
+            play_counts: HashMap::default(),
+            playlists: HashMap::default(),
+            recently_played: Vec::default(),
+            hidden_artists_albums: Vec::default(),
+            table_columns: default_table_columns(),
+        }
+    }
 }
 
 fn db_path() -> PathBuf {

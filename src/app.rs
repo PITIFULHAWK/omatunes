@@ -18,6 +18,7 @@ pub enum ContextMenuTarget {
     Album(String),
     Track(Track),
     MultipleTracks(Vec<Track>),
+    Header(crate::db::TableColumn),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,8 +42,12 @@ pub enum SortColumn {
     Title,
     Artist,
     Album,
+    Genre,
+    Year,
+    DiscNumber,
     Duration,
     Plays,
+    DatePlayed,
 }
 
 #[derive(Debug, Clone)]
@@ -97,7 +102,7 @@ pub enum Message {
     AddToPlaylist(String, Track),
     CreatePlaylist(String),
     SelectPlaylist(String),
-    OpenTagEditor(Track),
+    OpenTagEditor(Vec<Track>),
     CloseTagEditor,
     SearchCoverOnline,
     UpdateTagFieldTitle(String),
@@ -108,6 +113,15 @@ pub enum Message {
     UpdateTagFieldDiscNumber(String),
     UpdateTagFieldCoverPath(String),
     UpdateTagFieldApplyToAlbum(bool),
+    UpdateTagFieldYear(String),
+    ToggleTagFieldApplyTitle(bool),
+    ToggleTagFieldApplyArtist(bool),
+    ToggleTagFieldApplyAlbum(bool),
+    ToggleTagFieldApplyYear(bool),
+    ToggleTagFieldApplyGenre(bool),
+    ToggleTagFieldApplyTrackNum(bool),
+    ToggleTagFieldApplyDiscNum(bool),
+    ToggleTagFieldApplyCover(bool),
     SaveTags,
     LibraryScanned(Vec<Track>),
     RescanLibrary,
@@ -164,13 +178,23 @@ pub enum Message {
     ModifiersChanged(iced::keyboard::Modifiers),
     AddTracksToPlaylist(String, Vec<Track>),
     CreatePlaylistWithTracks(String, Vec<Track>),
+    ToggleColumnVisibility(crate::db::TableColumn),
+    MoveColumnLeft(crate::db::TableColumn),
+    MoveColumnRight(crate::db::TableColumn),
+    SelectPlaylistTab(PlaylistTab),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaylistTab {
+    Playlists,
+    Autoplaylists,
 }
 
 // ── Estado global ─────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
 pub struct TagEditorState {
-    pub track: Track,
+    pub tracks: Vec<Track>,
     pub title: String,
     pub artist: String,
     pub album: String,
@@ -179,6 +203,15 @@ pub struct TagEditorState {
     pub disc_number: String,
     pub cover_path: Option<String>,
     pub apply_to_album: bool,
+    pub year: String,
+    pub apply_title: bool,
+    pub apply_artist: bool,
+    pub apply_album: bool,
+    pub apply_year: bool,
+    pub apply_genre: bool,
+    pub apply_track_num: bool,
+    pub apply_disc_num: bool,
+    pub apply_cover: bool,
 }
 
 
@@ -257,6 +290,7 @@ pub struct AppState {
     pub last_clicked_track: Option<Track>,
     pub hidden_artists_albums: Vec<(String, bool)>,       // (Name, IsArtistOrAlbum)
 
+    pub playlist_tab: PlaylistTab,
     audio: AudioPlayer,
     mpris_cmd_rx: tokio::sync::mpsc::UnboundedReceiver<MprisCommand>,
     mpris_update_tx: tokio::sync::mpsc::UnboundedSender<MprisUpdate>,
@@ -265,7 +299,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn get_display_cover(&self) -> Option<iced::widget::image::Handle> {
-        let display_track = self.selected_track.as_ref().or(self.current_track.as_ref());
+        let display_track = self.current_track.as_ref();
         let track_id = display_track.map(|t| t.id);
         
         let mut cache = self.cover_cache.lock().unwrap();
@@ -357,6 +391,7 @@ impl AppState {
             selected_tracks: Vec::new(),
             last_clicked_track: None,
             hidden_artists_albums: crate::db::get(|db| db.hidden_artists_albums.clone()),
+            playlist_tab: PlaylistTab::Playlists,
             audio,
             mpris_cmd_rx,
             mpris_update_tx,
@@ -509,8 +544,24 @@ impl AppState {
                     SortColumn::Title => a.title.to_lowercase().cmp(&b.title.to_lowercase()),
                     SortColumn::Artist => a.artist.to_lowercase().cmp(&b.artist.to_lowercase()),
                     SortColumn::Album => a.album.to_lowercase().cmp(&b.album.to_lowercase()),
+                    SortColumn::Genre => a.genre.to_lowercase().cmp(&b.genre.to_lowercase()),
+                    SortColumn::Year => {
+                        let a_yr = a.year.unwrap_or(u32::MAX);
+                        let b_yr = b.year.unwrap_or(u32::MAX);
+                        a_yr.cmp(&b_yr)
+                    }
+                    SortColumn::DiscNumber => {
+                        let a_dc = a.disc_number.unwrap_or(u32::MAX);
+                        let b_dc = b.disc_number.unwrap_or(u32::MAX);
+                        a_dc.cmp(&b_dc)
+                    }
                     SortColumn::Duration => a.duration.cmp(&b.duration),
                     SortColumn::Plays => a.play_count.cmp(&b.play_count),
+                    SortColumn::DatePlayed => {
+                        let a_dp = a.date_played.as_deref().unwrap_or("");
+                        let b_dp = b.date_played.as_deref().unwrap_or("");
+                        a_dp.cmp(b_dp)
+                    }
                 };
                 if self.sort_ascending { cmp } else { cmp.reverse() }
             });
@@ -823,7 +874,37 @@ impl AppState {
                 Task::none()
             }
 
+            Message::SelectPlaylistTab(tab) => {
+                self.playlist_tab = tab;
+                self.selected_artist = None;
+                self.selected_album = None;
+                self.selected_genre = None;
+                self.selected_folder = None;
+                self.active_focus = Some(ActiveFocus::SidebarList);
+                self.search_query.clear();
+                match tab {
+                    PlaylistTab::Playlists => {
+                        let custom_playlists = crate::db::get(|db| db.playlists.keys().cloned().collect::<Vec<String>>());
+                        if let Some(first) = custom_playlists.first() {
+                            self.selected_playlist = Some(first.clone());
+                        } else {
+                            self.selected_playlist = None;
+                        }
+                    }
+                    PlaylistTab::Autoplaylists => {
+                        self.selected_playlist = Some("Liked Songs".to_string());
+                    }
+                }
+                self.update_filtered_tracks();
+                Task::none()
+            }
+
             Message::SelectPlaylist(name) => {
+                if name == "Liked Songs" || name == "Recently Played" || name == "Most Played" {
+                    self.playlist_tab = PlaylistTab::Autoplaylists;
+                } else {
+                    self.playlist_tab = PlaylistTab::Playlists;
+                }
                 let now = std::time::Instant::now();
                 if let Some((ref prev_name, last_time)) = self.last_click_playlist {
                     if prev_name == &name && now.duration_since(last_time) < std::time::Duration::from_millis(350) {
@@ -840,18 +921,40 @@ impl AppState {
                 Task::none()
             }
 
-            Message::OpenTagEditor(track) => {
+            Message::OpenTagEditor(tracks) => {
                 self.show_context_menu = None;
+                if tracks.is_empty() {
+                    return Task::none();
+                }
+
+                let first = &tracks[0];
+                let all_same_title = tracks.iter().all(|t| t.title == first.title);
+                let all_same_artist = tracks.iter().all(|t| t.artist == first.artist);
+                let all_same_album = tracks.iter().all(|t| t.album == first.album);
+                let all_same_genre = tracks.iter().all(|t| t.genre == first.genre);
+                let all_same_track_num = tracks.iter().all(|t| t.track_number == first.track_number);
+                let all_same_disc_num = tracks.iter().all(|t| t.disc_number == first.disc_number);
+                let all_same_year = tracks.iter().all(|t| t.year == first.year);
+
                 self.show_tag_editor = Some(TagEditorState {
-                    track: track.clone(),
-                    title: track.title.clone(),
-                    artist: track.artist.clone(),
-                    album: track.album.clone(),
-                    genre: track.genre.clone(),
-                    track_number: track.track_number.map(|n| n.to_string()).unwrap_or_default(),
-                    disc_number: track.disc_number.map(|n| n.to_string()).unwrap_or_default(),
+                    tracks: tracks.clone(),
+                    title: if all_same_title { first.title.clone() } else { String::new() },
+                    artist: if all_same_artist { first.artist.clone() } else { String::new() },
+                    album: if all_same_album { first.album.clone() } else { String::new() },
+                    genre: if all_same_genre { first.genre.clone() } else { String::new() },
+                    track_number: if all_same_track_num { first.track_number.map(|n| n.to_string()).unwrap_or_default() } else { String::new() },
+                    disc_number: if all_same_disc_num { first.disc_number.map(|n| n.to_string()).unwrap_or_default() } else { String::new() },
                     cover_path: None,
                     apply_to_album: false,
+                    year: if all_same_year { first.year.map(|n| n.to_string()).unwrap_or_default() } else { String::new() },
+                    apply_title: false,
+                    apply_artist: false,
+                    apply_album: false,
+                    apply_year: false,
+                    apply_genre: false,
+                    apply_track_num: false,
+                    apply_disc_num: false,
+                    apply_cover: false,
                 });
                 Task::none()
             }
@@ -911,55 +1014,126 @@ impl AppState {
             Message::UpdateTagFieldTitle(val) => {
                 if let Some(ref mut state) = self.show_tag_editor {
                     state.title = val;
+                    state.apply_title = true;
                 }
                 Task::none()
             }
-
+ 
             Message::UpdateTagFieldArtist(val) => {
                 if let Some(ref mut state) = self.show_tag_editor {
                     state.artist = val;
+                    state.apply_artist = true;
                 }
                 Task::none()
             }
-
+ 
             Message::UpdateTagFieldAlbum(val) => {
                 if let Some(ref mut state) = self.show_tag_editor {
                     state.album = val;
+                    state.apply_album = true;
                 }
                 Task::none()
             }
-
+ 
             Message::UpdateTagFieldGenre(val) => {
                 if let Some(ref mut state) = self.show_tag_editor {
                     state.genre = val;
+                    state.apply_genre = true;
                 }
                 Task::none()
             }
-
+ 
             Message::UpdateTagFieldTrackNumber(val) => {
                 if let Some(ref mut state) = self.show_tag_editor {
                     state.track_number = val;
+                    state.apply_track_num = true;
                 }
                 Task::none()
             }
-
+ 
             Message::UpdateTagFieldDiscNumber(val) => {
                 if let Some(ref mut state) = self.show_tag_editor {
                     state.disc_number = val;
+                    state.apply_disc_num = true;
                 }
                 Task::none()
             }
-
+ 
             Message::UpdateTagFieldCoverPath(val) => {
                 if let Some(ref mut state) = self.show_tag_editor {
                     state.cover_path = Some(val);
+                    state.apply_cover = true;
+                }
+                Task::none()
+            }
+ 
+            Message::UpdateTagFieldApplyToAlbum(val) => {
+                if let Some(ref mut state) = self.show_tag_editor {
+                    state.apply_to_album = val;
+                }
+                Task::none()
+            }
+ 
+            Message::UpdateTagFieldYear(val) => {
+                if let Some(ref mut state) = self.show_tag_editor {
+                    state.year = val;
+                    state.apply_year = true;
                 }
                 Task::none()
             }
 
-            Message::UpdateTagFieldApplyToAlbum(val) => {
+            Message::ToggleTagFieldApplyTitle(val) => {
                 if let Some(ref mut state) = self.show_tag_editor {
-                    state.apply_to_album = val;
+                    state.apply_title = val;
+                }
+                Task::none()
+            }
+
+            Message::ToggleTagFieldApplyArtist(val) => {
+                if let Some(ref mut state) = self.show_tag_editor {
+                    state.apply_artist = val;
+                }
+                Task::none()
+            }
+
+            Message::ToggleTagFieldApplyAlbum(val) => {
+                if let Some(ref mut state) = self.show_tag_editor {
+                    state.apply_album = val;
+                }
+                Task::none()
+            }
+
+            Message::ToggleTagFieldApplyYear(val) => {
+                if let Some(ref mut state) = self.show_tag_editor {
+                    state.apply_year = val;
+                }
+                Task::none()
+            }
+
+            Message::ToggleTagFieldApplyGenre(val) => {
+                if let Some(ref mut state) = self.show_tag_editor {
+                    state.apply_genre = val;
+                }
+                Task::none()
+            }
+
+            Message::ToggleTagFieldApplyTrackNum(val) => {
+                if let Some(ref mut state) = self.show_tag_editor {
+                    state.apply_track_num = val;
+                }
+                Task::none()
+            }
+
+            Message::ToggleTagFieldApplyDiscNum(val) => {
+                if let Some(ref mut state) = self.show_tag_editor {
+                    state.apply_disc_num = val;
+                }
+                Task::none()
+            }
+
+            Message::ToggleTagFieldApplyCover(val) => {
+                if let Some(ref mut state) = self.show_tag_editor {
+                    state.apply_cover = val;
                 }
                 Task::none()
             }
@@ -968,129 +1142,109 @@ impl AppState {
                 if let Some(ref state) = self.show_tag_editor {
                     let track_num = state.track_number.trim().parse::<u32>().ok();
                     let disc_num = state.disc_number.trim().parse::<u32>().ok();
+                    let year_num = state.year.trim().parse::<u32>().ok();
+
+                    let mut tracks_to_update = Vec::new();
                     if state.apply_to_album {
-                        let album_tracks: Vec<Track> = self.all_tracks.iter()
-                            .filter(|t| t.album == state.track.album)
-                            .cloned()
-                            .collect();
-                        
-                        let album_changed = state.album.trim() != state.track.album.trim();
-                        let genre_changed = state.genre.trim() != state.track.genre.trim();
-                        let artist_changed = state.artist.trim() != state.track.artist.trim();
-                        let cover_changed = state.cover_path.is_some();
-
-                        println!("SaveTags: apply_to_album=true, original album={:?}, found {} tracks. Changes: album={}, genre={}, artist={}, cover={}",
-                            state.track.album, album_tracks.len(), album_changed, genre_changed, artist_changed, cover_changed);
-
-                        for track in album_tracks {
-                            let is_edited_track = track.path == state.track.path;
-
-                            let title = if is_edited_track { &state.title } else { &track.title };
-                            let track_number = if is_edited_track { track_num } else { track.track_number };
-                            let disc_number = if is_edited_track { disc_num } else { track.disc_number };
-                            
-                            let artist = if is_edited_track || artist_changed { &state.artist } else { &track.artist };
-                            let album = if is_edited_track || album_changed { &state.album } else { &track.album };
-                            let genre = if is_edited_track || genre_changed { &state.genre } else { &track.genre };
-                            let cover_path = if is_edited_track || cover_changed { state.cover_path.as_deref() } else { None };
-
-                            let res = crate::library::write_tags(
-                                &track.path,
-                                title,
-                                artist,
-                                album,
-                                genre,
-                                track_number,
-                                disc_number,
-                                cover_path,
-                            );
-                            if let Err(e) = res {
-                                eprintln!("Error saving tags for {}: {e}", track.path.display());
-                            } else {
-                                if let Some(t) = self.all_tracks.iter_mut().find(|t| t.path == track.path) {
-                                    t.title = title.clone();
-                                    t.artist = artist.clone();
-                                    t.album = album.clone();
-                                    t.genre = genre.clone();
-                                    t.track_number = track_number;
-                                    t.disc_number = disc_number;
-                                    if cover_path.is_some() {
-                                        t.cover_data = load_cover(&t.path);
-                                    }
-                                }
-                                if let Some(t) = self.tracks.iter_mut().find(|t| t.path == track.path) {
-                                    t.title = title.clone();
-                                    t.artist = artist.clone();
-                                    t.album = album.clone();
-                                    t.genre = genre.clone();
-                                    t.track_number = track_number;
-                                    t.disc_number = disc_number;
-                                    if cover_path.is_some() {
-                                        t.cover_data = load_cover(&t.path);
-                                    }
-                                }
-                                if let Some(ref mut ct) = self.current_track {
-                                    if ct.path == track.path {
-                                        ct.title = title.clone();
-                                        ct.artist = artist.clone();
-                                        ct.album = album.clone();
-                                        ct.genre = genre.clone();
-                                        ct.track_number = track_number;
-                                        ct.disc_number = disc_number;
-                                        if cover_path.is_some() {
-                                            ct.cover_data = load_cover(&ct.path);
-                                        }
-                                    }
-                                }
+                        let albums: Vec<String> = state.tracks.iter().map(|t| t.album.clone()).collect();
+                        for t in &self.all_tracks {
+                            if albums.contains(&t.album) {
+                                tracks_to_update.push(t.clone());
                             }
                         }
                     } else {
+                        tracks_to_update = state.tracks.clone();
+                    }
+
+                    println!("SaveTags: apply_to_album={}, updating {} tracks.",
+                        state.apply_to_album, tracks_to_update.len());
+
+                    for track in tracks_to_update {
+                        let title = if state.apply_title { &state.title } else { &track.title };
+                        let artist = if state.apply_artist { &state.artist } else { &track.artist };
+                        let album = if state.apply_album { &state.album } else { &track.album };
+                        let genre = if state.apply_genre { &state.genre } else { &track.genre };
+                        let track_number = if state.apply_track_num { track_num } else { track.track_number };
+                        let disc_number = if state.apply_disc_num { disc_num } else { track.disc_number };
+                        let year = if state.apply_year { year_num } else { track.year };
+                        let cover_path = if state.apply_cover { state.cover_path.as_deref() } else { None };
+
                         let res = crate::library::write_tags(
-                            &state.track.path,
-                            &state.title,
-                            &state.artist,
-                            &state.album,
-                            &state.genre,
-                            track_num,
-                            disc_num,
-                            state.cover_path.as_deref(),
+                            &track.path,
+                            title,
+                            artist,
+                            album,
+                            genre,
+                            track_number,
+                            disc_number,
+                            cover_path,
+                            year,
                         );
                         if let Err(e) = res {
-                            eprintln!("Error saving tags: {e}");
+                            eprintln!("Error saving tags for {}: {e}", track.path.display());
                         } else {
-                            if let Some(t) = self.all_tracks.iter_mut().find(|t| t.path == state.track.path) {
-                                t.title = state.title.clone();
-                                t.artist = state.artist.clone();
-                                t.album = state.album.clone();
-                                t.genre = state.genre.clone();
-                                t.track_number = track_num;
-                                t.disc_number = disc_num;
-                                if state.cover_path.is_some() {
+                            if let Some(t) = self.all_tracks.iter_mut().find(|t| t.path == track.path) {
+                                t.title = title.clone();
+                                t.artist = artist.clone();
+                                t.album = album.clone();
+                                t.genre = genre.clone();
+                                t.track_number = track_number;
+                                t.disc_number = disc_number;
+                                t.year = year;
+                                if cover_path.is_some() {
                                     t.cover_data = load_cover(&t.path);
                                 }
                             }
-                            if let Some(t) = self.tracks.iter_mut().find(|t| t.path == state.track.path) {
-                                t.title = state.title.clone();
-                                t.artist = state.artist.clone();
-                                t.album = state.album.clone();
-                                t.genre = state.genre.clone();
-                                t.track_number = track_num;
-                                t.disc_number = disc_num;
-                                if state.cover_path.is_some() {
+                            if let Some(t) = self.tracks.iter_mut().find(|t| t.path == track.path) {
+                                t.title = title.clone();
+                                t.artist = artist.clone();
+                                t.album = album.clone();
+                                t.genre = genre.clone();
+                                t.track_number = track_number;
+                                t.disc_number = disc_number;
+                                t.year = year;
+                                if cover_path.is_some() {
                                     t.cover_data = load_cover(&t.path);
                                 }
                             }
                             if let Some(ref mut ct) = self.current_track {
-                                if ct.path == state.track.path {
-                                    ct.title = state.title.clone();
-                                    ct.artist = state.artist.clone();
-                                    ct.album = state.album.clone();
-                                    ct.genre = state.genre.clone();
-                                    ct.track_number = track_num;
-                                    ct.disc_number = disc_num;
-                                    if state.cover_path.is_some() {
+                                if ct.path == track.path {
+                                    ct.title = title.clone();
+                                    ct.artist = artist.clone();
+                                    ct.album = album.clone();
+                                    ct.genre = genre.clone();
+                                    ct.track_number = track_number;
+                                    ct.disc_number = disc_number;
+                                    ct.year = year;
+                                    if cover_path.is_some() {
                                         ct.cover_data = load_cover(&ct.path);
                                     }
+                                }
+                            }
+                            if let Some(ref mut st) = self.selected_track {
+                                if st.path == track.path {
+                                    st.title = title.clone();
+                                    st.artist = artist.clone();
+                                    st.album = album.clone();
+                                    st.genre = genre.clone();
+                                    st.track_number = track_number;
+                                    st.disc_number = disc_number;
+                                    st.year = year;
+                                    if cover_path.is_some() {
+                                        st.cover_data = load_cover(&st.path);
+                                    }
+                                }
+                            }
+                            if let Some(t) = self.selected_tracks.iter_mut().find(|t| t.path == track.path) {
+                                t.title = title.clone();
+                                t.artist = artist.clone();
+                                t.album = album.clone();
+                                t.genre = genre.clone();
+                                t.track_number = track_number;
+                                t.disc_number = disc_number;
+                                t.year = year;
+                                if cover_path.is_some() {
+                                    t.cover_data = load_cover(&t.path);
                                 }
                             }
                         }
@@ -1142,10 +1296,19 @@ impl AppState {
             }
 
             Message::KeyboardEdit => {
-                if let Some(ref track) = self.current_track {
-                    let mut t = track.clone();
-                    t.cover_data = None;
-                    return Task::done(Message::OpenTagEditor(t));
+                let tracks_to_edit = if !self.selected_tracks.is_empty() {
+                    self.selected_tracks.clone()
+                } else if let Some(ref track) = self.current_track {
+                    vec![track.clone()]
+                } else {
+                    Vec::new()
+                };
+                if !tracks_to_edit.is_empty() {
+                    let mut cleaned = tracks_to_edit;
+                    for t in &mut cleaned {
+                        t.cover_data = None;
+                    }
+                    return Task::done(Message::OpenTagEditor(cleaned));
                 }
                 Task::none()
             }
@@ -1899,6 +2062,41 @@ impl AppState {
                 Task::none()
             }
 
+            Message::ToggleColumnVisibility(col) => {
+                crate::db::write(|db| {
+                    if db.table_columns.contains(&col) {
+                        if db.table_columns.len() > 1 {
+                            db.table_columns.retain(|&c| c != col);
+                        }
+                    } else {
+                        db.table_columns.push(col);
+                    }
+                });
+                Task::none()
+            }
+
+            Message::MoveColumnLeft(col) => {
+                crate::db::write(|db| {
+                    if let Some(pos) = db.table_columns.iter().position(|&c| c == col) {
+                        if pos > 0 {
+                            db.table_columns.swap(pos, pos - 1);
+                        }
+                    }
+                });
+                Task::none()
+            }
+
+            Message::MoveColumnRight(col) => {
+                crate::db::write(|db| {
+                    if let Some(pos) = db.table_columns.iter().position(|&c| c == col) {
+                        if pos < db.table_columns.len() - 1 {
+                            db.table_columns.swap(pos, pos + 1);
+                        }
+                    }
+                });
+                Task::none()
+            }
+
             Message::HideAlbumOrArtist(name, is_artist) => {
                 self.hidden_artists_albums.push((name.clone(), is_artist));
                 crate::db::write(|db| {
@@ -1998,7 +2196,24 @@ impl AppState {
         let mut view_stack = stack![app_container];
 
         if let Some(ref editor_state) = self.show_tag_editor {
-            view_stack = view_stack.push(crate::ui::components::tag_editor::view(editor_state));
+            let mut unique_artists: Vec<String> = self.all_tracks.iter().map(|t| t.artist.clone()).filter(|s| !s.trim().is_empty()).collect();
+            unique_artists.sort();
+            unique_artists.dedup();
+
+            let mut unique_albums: Vec<String> = self.all_tracks.iter().map(|t| t.album.clone()).filter(|s| !s.trim().is_empty()).collect();
+            unique_albums.sort();
+            unique_albums.dedup();
+
+            let mut unique_genres: Vec<String> = self.all_tracks.iter().map(|t| t.genre.clone()).filter(|s| !s.trim().is_empty()).collect();
+            unique_genres.sort();
+            unique_genres.dedup();
+
+            view_stack = view_stack.push(crate::ui::components::tag_editor::view(
+                editor_state,
+                &unique_artists,
+                &unique_albums,
+                &unique_genres,
+            ));
         } else if let Some(ref playlist_dialog_state) = self.playlist_dialog {
             view_stack = view_stack.push(crate::ui::components::playlist_dialog::view(playlist_dialog_state));
         } else if self.show_shortcuts {
@@ -2136,7 +2351,7 @@ impl AppState {
                         .width(Length::Fill);
 
                     let tag_btn = button(text("Edit ID3 tag").size(12))
-                        .on_press(Message::OpenTagEditor(track.clone()))
+                        .on_press(Message::OpenTagEditor(vec![track.clone()]))
                         .style(item_style)
                         .padding([4, 8])
                         .width(Length::Fill);
@@ -2170,13 +2385,89 @@ impl AppState {
                         );
                     }
 
+                    let tag_btn = button(text("Edit ID3 tags").size(12))
+                        .on_press(Message::OpenTagEditor(tracks.clone()))
+                        .style(item_style)
+                        .padding([4, 8])
+                        .width(Length::Fill);
+
                     let create = button(text("+ Create playlist with selection").size(12))
                         .on_press(Message::CreatePlaylistWithTracks("Selected Tracks Playlist".to_string(), tracks.clone()))
                         .style(accent_item_style)
                         .padding([4, 8])
                         .width(Length::Fill);
 
-                    (title, None, create)
+                    let selection_actions = column![
+                        tag_btn,
+                    ];
+
+                    (title, Some(selection_actions.into()), create)
+                }
+                ContextMenuTarget::Header(clicked_col) => {
+                    let title = "Table Columns".to_string();
+                    let active_cols = crate::db::get(|db| db.table_columns.clone());
+                    
+                    let mut cols_col = column![
+                        text("Show / Hide:")
+                            .size(11)
+                            .color(theme::subtext())
+                            .font(crate::ui::icons::UI_FONT_BOLD),
+                        Space::with_height(4)
+                    ].spacing(4);
+
+                    for &col in crate::db::TableColumn::all() {
+                        let is_visible = active_cols.contains(&col);
+                        let col_label = col.label();
+                        
+                        let icon_str = if is_visible { " " } else { " " };
+                        let btn = button(
+                            row![
+                                text(icon_str)
+                                    .font(crate::ui::icons::NERD_FONT_MONO)
+                                    .color(if is_visible { theme::accent() } else { theme::overlay0() })
+                                    .size(14),
+                                text(col_label).size(13).color(theme::text())
+                            ].spacing(8)
+                        )
+                        .on_press(Message::ToggleColumnVisibility(col))
+                        .style(item_style)
+                        .padding([4, 8])
+                        .width(Length::Fill);
+
+                        cols_col = cols_col.push(btn);
+                    }
+
+                    let move_left_btn = button(text("<- Move Column Left").size(12))
+                        .on_press(Message::MoveColumnLeft(*clicked_col))
+                        .style(item_style)
+                        .padding([4, 8])
+                        .width(Length::Fill);
+                        
+                    let move_right_btn = button(text("-> Move Column Right").size(12))
+                        .on_press(Message::MoveColumnRight(*clicked_col))
+                        .style(item_style)
+                        .padding([4, 8])
+                        .width(Length::Fill);
+
+                    let header_actions = column![
+                        text(format!("Modify Column: {}", clicked_col.label()))
+                            .size(11)
+                            .color(theme::subtext())
+                            .font(crate::ui::icons::UI_FONT_BOLD),
+                        Space::with_height(4),
+                        move_left_btn,
+                        Space::with_height(4),
+                        move_right_btn,
+                        Space::with_height(8),
+                    ];
+
+                    playlist_select = cols_col;
+                    
+                    let dummy_create = button(text(""))
+                        .style(iced::widget::button::text)
+                        .padding(0);
+
+                    (title, Some(header_actions.into()), dummy_create)
                 }
             };
 
