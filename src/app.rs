@@ -27,6 +27,7 @@ pub enum ViewMode {
     Artists,
     Albums,
     Genres,
+    Folders,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -166,6 +167,7 @@ pub enum Message {
     SelectAllArtists,
     SelectAllAlbums,
     SelectAllGenres,
+    SelectAllFolders,
     SortBy(SortColumn),
     OpenPlaylistDialog(PlaylistDialogMode),
     ClosePlaylistDialog,
@@ -462,7 +464,7 @@ impl AppState {
             filter_genre: true,
             selected_playlist: None,
             show_tag_editor: None,
-            view_mode: ViewMode::Artists,
+            view_mode: ViewMode::Folders,
             selected_artist: None,
             selected_album: None,
             selected_genre: None,
@@ -570,6 +572,24 @@ impl AppState {
             genres.retain(|g| g.to_lowercase().contains(&query));
         }
         genres
+    }
+
+    pub fn folders_display(&self) -> Vec<(PathBuf, String)> {
+        let query = self.sidebar_search.to_lowercase();
+        let mut result: Vec<(PathBuf, String)> = self.folders.iter()
+            .map(|p| {
+                let name = p.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                (p.clone(), name)
+            })
+            .collect();
+        result.sort_by(|a, b| a.1.cmp(&b.1));
+        if !query.is_empty() {
+            result.retain(|(_, name)| name.to_lowercase().contains(&query));
+        }
+        result
     }
 
     pub fn update_filtered_tracks(&mut self) {
@@ -695,6 +715,16 @@ impl AppState {
                         self.tracks = self.all_tracks.clone();
                     }
                 }
+                ViewMode::Folders => {
+                    if let Some(folder_path) = &self.selected_folder {
+                        self.tracks = self.all_tracks.iter()
+                            .filter(|t| t.path.starts_with(folder_path))
+                            .cloned()
+                            .collect();
+                    } else {
+                        self.tracks = self.all_tracks.clone();
+                    }
+                }
             }
         }
 
@@ -746,7 +776,12 @@ impl AppState {
             Message::SelectFolder(path) => {
                 self.selected_folder = Some(path);
                 self.selected_playlist = None;
+                self.selected_artist = None;
+                self.selected_album = None;
+                self.selected_genre = None;
+                self.selected_tracks.clear();
                 self.search_query.clear();
+                self.active_focus = Some(ActiveFocus::SidebarList);
                 self.update_filtered_tracks();
                 Task::none()
             }
@@ -1767,6 +1802,18 @@ impl AppState {
                 Task::none()
             }
 
+            Message::SelectAllFolders => {
+                self.selected_folder = None;
+                self.selected_playlist = None;
+                self.selected_artist = None;
+                self.selected_album = None;
+                self.selected_genre = None;
+                self.active_focus = Some(ActiveFocus::SidebarList);
+                self.search_query.clear();
+                self.update_filtered_tracks();
+                Task::none()
+            }
+
             Message::SelectArtist(artist) => {
                 let now = std::time::Instant::now();
                 if let Some((ref prev_artist, last_time)) = self.last_click_artist {
@@ -2004,6 +2051,21 @@ impl AppState {
                                 }
                             }
                         }
+                        ViewMode::Folders => {
+                            let folders = self.folders_display();
+                            if !folders.is_empty() {
+                                let current_idx = self.selected_folder.as_ref()
+                                    .and_then(|sf| folders.iter().position(|(p, _)| p == sf));
+                                let next_idx = match current_idx {
+                                    Some(i) => if i == 0 { folders.len() - 1 } else { i - 1 },
+                                    None => 0,
+                                };
+                                if let Some((path, _)) = folders.get(next_idx).cloned() {
+                                    self.selected_folder = Some(path);
+                                    self.update_filtered_tracks();
+                                }
+                            }
+                        }
                     }
                 }
                 Task::none()
@@ -2074,6 +2136,21 @@ impl AppState {
                                 };
                                 if let Some(genre) = genres.get(next_idx).cloned() {
                                     self.selected_genre = Some(genre);
+                                    self.update_filtered_tracks();
+                                }
+                            }
+                        }
+                        ViewMode::Folders => {
+                            let folders = self.folders_display();
+                            if !folders.is_empty() {
+                                let current_idx = self.selected_folder.as_ref()
+                                    .and_then(|sf| folders.iter().position(|(p, _)| p == sf));
+                                let next_idx = match current_idx {
+                                    Some(i) => (i + 1) % folders.len(),
+                                    None => 0,
+                                };
+                                if let Some((path, _)) = folders.get(next_idx).cloned() {
+                                    self.selected_folder = Some(path);
                                     self.update_filtered_tracks();
                                 }
                             }
@@ -2253,6 +2330,14 @@ impl AppState {
                                         if self.selected_genre.is_none() {
                                             if let Some(genre) = self.genres().first().cloned() {
                                                 self.selected_genre = Some(genre);
+                                                self.update_filtered_tracks();
+                                            }
+                                        }
+                                    }
+                                    ViewMode::Folders => {
+                                        if self.selected_folder.is_none() {
+                                            if let Some((path, _)) = self.folders_display().first().cloned() {
+                                                self.selected_folder = Some(path);
                                                 self.update_filtered_tracks();
                                             }
                                         }
