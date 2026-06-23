@@ -101,6 +101,7 @@ fn folder_sidebar(state: &AppState) -> Element<'_, Message> {
     .spacing(4);
 
     let tabs = row![
+        tab_btn(ViewMode::Folders, "Folders"),
         tab_btn(ViewMode::Artists, "Artists"),
         tab_btn(ViewMode::Albums, "Albums"),
         tab_btn(ViewMode::Genres, "Genres"),
@@ -215,6 +216,43 @@ fn folder_sidebar(state: &AppState) -> Element<'_, Message> {
                         container(btn).style(theme::selected_row).width(Length::Fill).into()
                     } else {
                         container(btn).width(Length::Fill).into()
+                    }
+                })
+                .collect::<Vec<_>>(),
+            )
+            .spacing(2)
+            .into()
+        }
+        ViewMode::Folders => {
+            column(
+                state.folders_display().into_iter().map(|(path, name)| {
+                    let is_selected = state.selected_folder.as_ref() == Some(&path) && state.selected_playlist.is_none();
+
+                    let icon = text("\u{f07b}")
+                        .font(crate::ui::icons::NERD_FONT_MONO)
+                        .color(if is_selected { theme::accent() } else { theme::overlay0() })
+                        .size(14);
+
+                    let label = text(name.clone())
+                        .color(if is_selected { theme::accent() } else { theme::text() })
+                        .size(13);
+
+                    let btn_row = row![
+                        icon,
+                        Space::with_width(8),
+                        button(label)
+                            .on_press(Message::SelectFolder(path.clone()))
+                            .style(iced::widget::button::text)
+                            .width(Length::Fill)
+                            .padding([6, 0]),
+                    ]
+                    .align_y(Alignment::Center)
+                    .padding([6, 12]);
+
+                    if is_selected {
+                        container(btn_row).style(theme::selected_row).width(Length::Fill).into()
+                    } else {
+                        container(btn_row).width(Length::Fill).into()
                     }
                 })
                 .collect::<Vec<_>>(),
@@ -523,6 +561,50 @@ fn folder_sidebar(state: &AppState) -> Element<'_, Message> {
                 .size(13);
             let btn = button(label)
                 .on_press(Message::SelectAllGenres)
+                .style(iced::widget::button::text)
+                .width(Length::Fill)
+                .padding([6, 12]);
+            let row_container = if is_selected {
+                container(btn)
+                    .style(|_| iced::widget::container::Style {
+                        background: Some(iced::Background::Color(theme::with_alpha(theme::accent(), 0.15))),
+                        border: iced::Border {
+                            color: theme::with_alpha(theme::accent(), 0.4),
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..Default::default()
+                    })
+                    .width(Length::Fill)
+            } else {
+                container(btn)
+                    .style(|_| iced::widget::container::Style {
+                        background: Some(iced::Background::Color(theme::surface0())),
+                        border: iced::Border {
+                            color: iced::Color::TRANSPARENT,
+                            width: 0.0,
+                            radius: 4.0.into(),
+                        },
+                        ..Default::default()
+                    })
+                    .width(Length::Fill)
+            };
+            row_container.into()
+        }
+        ViewMode::Folders => {
+            let is_selected = state.selected_folder.is_none() && state.selected_playlist.is_none();
+            let icon = text("\u{f07b} ")
+                .font(crate::ui::icons::NERD_FONT_MONO)
+                .color(if is_selected { theme::accent() } else { theme::overlay0() })
+                .size(13);
+            let label = text("All Folders")
+                .color(if is_selected { theme::accent() } else { theme::text() })
+                .font(crate::ui::icons::UI_FONT_BOLD)
+                .size(13);
+            let btn = button(
+                row![icon, label].align_y(Alignment::Center)
+            )
+                .on_press(Message::SelectAllFolders)
                 .style(iced::widget::button::text)
                 .width(Length::Fill)
                 .padding([6, 12]);
