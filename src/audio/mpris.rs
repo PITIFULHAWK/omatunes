@@ -19,6 +19,7 @@ pub enum MprisUpdate {
         artist: String,
         album: String,
         duration_us: i64,
+        url: String,
     },
     Status(PlaybackStatus),
     Volume(f64),
@@ -85,12 +86,13 @@ pub fn launch(
 
             while let Some(update) = update_rx.recv().await {
                 match update {
-                    MprisUpdate::Metadata { title, artist, album, duration_us } => {
+                    MprisUpdate::Metadata { title, artist, album, duration_us, url } => {
                         let metadata = Metadata::builder()
                             .title(title)
                             .artist([artist])
                             .album(album)
                             .length(Time::from_micros(duration_us))
+                            .url(url)
                             .build();
                         player.set_metadata(metadata).await.ok();
                     }

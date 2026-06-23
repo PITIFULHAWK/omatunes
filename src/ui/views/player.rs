@@ -282,50 +282,70 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
                                 .map(|idx| if idx > 0 { idx - 1 } else { 0 })
                                 .unwrap_or_else(|| lrc_lines.len() - 1);
 
-                            // Show ALL lines in a scrollable container; highlight the active one
-                            let mut lines_col = column![].spacing(6).align_x(Alignment::Center).width(Length::Fill);
-                            for i in 0..lrc_lines.len() {
-                                let line = &lrc_lines[i];
-                                let is_active = i == active_idx;
-                                let line_time = line.time;
+                             // Show ALL lines in a scrollable container; highlight the active one
+                             let mut lines_col = column![].spacing(6).align_x(Alignment::Center).width(Length::Fill);
+                             lines_col = lines_col.push(iced::widget::Space::with_height(108.0));
 
-                                let text_element = text(line.text.clone())
-                                    .size(if is_active { 20 } else { 17 })
-                                    .font(if is_active { crate::ui::icons::UI_FONT_BOLD } else { crate::ui::icons::UI_FONT })
-                                    .color(if is_active { theme::accent() } else { theme::overlay0() })
-                                    .width(Length::Fill)
-                                    .align_x(iced::alignment::Horizontal::Center);
+                             let available_width = (state.right_panel_width - 40.0).max(100.0);
 
-                                // Each line is clickable to seek to that timestamp
-                                let line_btn = button(text_element)
-                                    .on_press(Message::SeekToLyric(line_time))
-                                    .width(Length::Fill)
-                                    .padding([4, 8])
-                                    .style(move |_theme: &iced::Theme, status: iced::widget::button::Status| {
-                                        let is_hovered = status == iced::widget::button::Status::Hovered || status == iced::widget::button::Status::Pressed;
-                                        iced::widget::button::Style {
-                                            background: if is_hovered {
-                                                Some(iced::Background::Color(theme::with_alpha(theme::accent(), 0.1)))
-                                            } else {
-                                                None
-                                            },
-                                            text_color: if is_active {
-                                                theme::accent()
-                                            } else if is_hovered {
-                                                theme::text()
-                                            } else {
-                                                theme::overlay0()
-                                            },
-                                            border: iced::Border {
-                                                radius: 4.0.into(),
-                                                ..Default::default()
-                                            },
-                                            ..Default::default()
-                                        }
-                                    });
+                             for i in 0..lrc_lines.len() {
+                                 let line = &lrc_lines[i];
+                                 let is_active = i == active_idx;
+                                 let is_interim = (active_idx > 0 && i == active_idx - 1) || (i == active_idx + 1);
+                                 let line_time = line.time;
 
-                                lines_col = lines_col.push(line_btn);
-                            }
+                                 let font_size = if is_active { 20 } else { 17 };
+                                 let char_width = 0.60 * font_size as f32;
+                                 let max_chars = ((available_width / char_width).floor() as usize).max(10);
+                                 let sub_lines = wrap_text(&line.text, max_chars);
+
+                                 let mut text_col = column![].spacing(2).align_x(Alignment::Center).width(Length::Fill);
+                                 for sub_line in sub_lines {
+                                     let txt = text(sub_line)
+                                         .size(font_size)
+                                         .font(if is_active { crate::ui::icons::UI_FONT_BOLD } else { crate::ui::icons::UI_FONT })
+                                         .width(Length::Fill)
+                                         .align_x(iced::alignment::Horizontal::Center);
+                                     text_col = text_col.push(txt);
+                                 }
+
+                                 let container_element = container(text_col)
+                                     .width(Length::Fill)
+                                     .align_x(iced::alignment::Horizontal::Center);
+
+                                 // Each line is clickable to seek to that timestamp
+                                 let line_btn = button(container_element)
+                                     .on_press(Message::SeekToLyric(line_time))
+                                     .width(Length::Fill)
+                                     .padding([4, 8])
+                                     .style(move |_theme: &iced::Theme, status: iced::widget::button::Status| {
+                                         let is_hovered = status == iced::widget::button::Status::Hovered || status == iced::widget::button::Status::Pressed;
+                                         iced::widget::button::Style {
+                                             background: if is_hovered {
+                                                 Some(iced::Background::Color(theme::with_alpha(theme::accent(), 0.1)))
+                                             } else {
+                                                 None
+                                             },
+                                             text_color: if is_active {
+                                                 theme::accent()
+                                             } else if is_hovered {
+                                                 theme::text()
+                                             } else if is_interim {
+                                                 theme::lerp_color(theme::accent(), theme::overlay0(), 0.5)
+                                             } else {
+                                                 theme::overlay0()
+                                             },
+                                             border: iced::Border {
+                                                 radius: 4.0.into(),
+                                                 ..Default::default()
+                                             },
+                                             ..Default::default()
+                                         }
+                                     });
+
+                                 lines_col = lines_col.push(line_btn);
+                             }
+                             lines_col = lines_col.push(iced::widget::Space::with_height(108.0));
 
                             scrollable(
                                 container(lines_col)
@@ -495,4 +515,35 @@ pub fn parse_lrc(lyrics: &str) -> Vec<LrcLine> {
     }
     lines.sort_by_key(|l| l.time);
     lines
+}
+
+fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
+    let mut sub_lines = Vec::new();
+    let text_trimmed = text.trim();
+    if text_trimmed.is_empty() {
+        return vec![String::new()];
+    }
+
+    for paragraph in text_trimmed.lines() {
+        let mut current_line = String::new();
+        for word in paragraph.split_whitespace() {
+            if current_line.is_empty() {
+                current_line.push_str(word);
+            } else if current_line.len() + 1 + word.len() <= max_chars {
+                current_line.push(' ');
+                current_line.push_str(word);
+            } else {
+                sub_lines.push(current_line);
+                current_line = String::from(word);
+            }
+        }
+        if !current_line.is_empty() {
+            sub_lines.push(current_line);
+        }
+    }
+
+    if sub_lines.is_empty() {
+        sub_lines.push(String::new());
+    }
+    sub_lines
 }

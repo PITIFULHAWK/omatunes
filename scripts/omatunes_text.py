@@ -73,33 +73,7 @@ def send_notify(title, message, icon="multimedia-audio-player", sound_file=None)
     except:
         pass
 
-# -------------------
-# Handle Arguments
-# -------------------
-if len(sys.argv) > 1:
-    arg = sys.argv[1]
-    if arg == "--click" and len(sys.argv) > 2:
-        button = sys.argv[2]
-        if button == "left":
-            subprocess.run(["playerctl", "-p", "omatunes", "play-pause"])
-        elif button == "right":
-            subprocess.run(["playerctl", "-p", "omatunes", "next"])
-        elif button == "middle":
-            subprocess.run(["playerctl", "-p", "omatunes", "previous"])
-        sys.exit(0)
-    elif arg == "--double-click" and len(sys.argv) > 2:
-        button = sys.argv[2]
-        if button == "right":
-            import socket
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.sendto(b"like", ("127.0.0.1", 18888))
-                s.close()
-            except:
-                pass
-        elif button == "left":
-            subprocess.run(["hyprctl", "dispatch", "focuswindow", "title:^omatunes$"])
-        sys.exit(0)
+
 
 # -------------------
 # Session tracking
@@ -222,12 +196,101 @@ theme_colors = {
     "progress": COLORS.get("blue"),
 }
 
+def is_track_liked(track_url):
+    if not track_url:
+        return False
+    path_str = track_url
+    if path_str.startswith("file://"):
+        path_str = urllib.parse.unquote(path_str[7:])
+    db_path = pathlib.Path.home() / ".config/omatunes/db.json"
+    if not db_path.exists():
+        return False
+    try:
+        with open(db_path, "r") as f:
+            db_data = json.load(f)
+        favorites = db_data.get("favorites", [])
+        norm_path = os.path.abspath(os.path.expanduser(path_str))
+        for fav in favorites:
+            if os.path.abspath(os.path.expanduser(fav)) == norm_path:
+                return True
+    except:
+        pass
+    return False
+
+if len(sys.argv) > 1:
+    arg = sys.argv[1]
+    if arg == "--click" and len(sys.argv) > 2:
+        button = sys.argv[2]
+        import socket
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            if button == "play":
+                s.sendto(b"play-pause", ("127.0.0.1", 18888))
+            elif button == "next":
+                s.sendto(b"next", ("127.0.0.1", 18888))
+            elif button == "like":
+                s.sendto(b"like", ("127.0.0.1", 18888))
+            s.close()
+        except:
+            pass
+        sys.exit(0)
+    elif arg == "--button" and len(sys.argv) > 2:
+        button_name = sys.argv[2]
+        state = None
+        state_path = "/tmp/omatunes_waybar_state.json"
+        try:
+            if os.path.exists(state_path) and (time.time() - os.path.getmtime(state_path)) < 3.0:
+                with open(state_path, "r") as f:
+                    state = json.load(f)
+        except:
+            pass
+
+        if not state or state.get("status", "stopped") == "stopped":
+            print(json.dumps({}))
+            sys.exit(0)
+
+        status = state["status"]
+        liked = state["liked"]
+
+        red = COLORS.get("red", "#ff0000")
+        gray = "#565f89"
+        cyan = COLORS.get("cyan", "#00ffff")
+
+        if button_name == "play":
+            icon = "" if status == "playing" else ""
+            color = cyan
+            tooltip = "Pause" if status == "playing" else "Play"
+        elif button_name == "next":
+            icon = ""
+            color = cyan
+            tooltip = "Next Track"
+        elif button_name == "like":
+            icon = "" if liked else ""
+            color = red if liked else gray
+            tooltip = "Unlike" if liked else "Like"
+        else:
+            print(json.dumps({}))
+            sys.exit(0)
+
+        print(json.dumps({
+            "text": f"<span foreground='{color}'>{icon}</span>",
+            "tooltip": tooltip,
+            "markup": "pango",
+            "class": button_name
+        }))
+        sys.exit(0)
+
 # -------------------
 # Main OmaTunes Logic
 # -------------------
 status = get("playerctl --player=omatunes status").lower()
 
 if not status or status == "stopped":
+    try:
+        if os.path.exists("/tmp/omatunes_waybar_state.json"):
+            os.unlink("/tmp/omatunes_waybar_state.json")
+    except:
+        pass
     print(json.dumps({}))
     exit()
 
@@ -475,22 +538,37 @@ pad = get_pad(footer_text, max_w, ratio)
 
 tooltip.append(f"<span font_family='monospace' size='{f_size}' foreground='{COLORS['white']}'>{' ' * pad}{footer_text}</span>")
 
-status_icon = "" if status == "playing" else ""
+# Write state cache for button modules
+state_cache = {
+    "status": status,
+    "title": title_raw,
+    "artist": artist_raw,
+    "album": album,
+    "volume": volume,
+    "position": position,
+    "length": length,
+    "shuffle": shuffle,
+    "loop": loop,
+    "liked": is_track_liked(get("playerctl --player=omatunes metadata xesam:url")),
+    "timestamp": time.time()
+}
+try:
+    with open("/tmp/omatunes_waybar_state.json", "w") as f:
+        json.dump(state_cache, f)
+except:
+    pass
+
 icon_color = COLORS.get("cyan") if status == "playing" else theme_colors['artist']
 
 if status == "playing":
-    status_icon = ""
-    icon_color = COLORS.get("cyan")
     artist_color = theme_colors['artist']
     song_color = theme_colors['song']
 else:
-    status_icon = ""
     icon_color = "#565f89" 
     artist_color = "#565f89"
     song_color = "#565f89"
 
 display_text = (
-    f"<span foreground='{icon_color}'>{status_icon} </span>"
     f"<span foreground='{artist_color}'><b>{artist}</b></span> - "
     f"<span foreground='{song_color}'><i>{truncate_text(title, 24)}</i></span>"
 )
@@ -500,7 +578,4 @@ print(json.dumps({
     "tooltip": "\n".join(tooltip),
     "markup": "pango",
     "class": status,
-    "on-click": "playerctl --player=omatunes play-pause",
-    "on-right-click": "playerctl --player=omatunes next",
-    "on-middle-click": "playerctl --player=omatunes previous",
 }))

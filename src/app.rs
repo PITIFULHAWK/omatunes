@@ -528,6 +528,7 @@ impl AppState {
                 artist: track.artist.clone(),
                 album: track.album.clone(),
                 duration_us: track.duration.as_micros() as i64,
+                url: track.path.to_string_lossy().to_string(),
             });
         }
         self.send_mpris(MprisUpdate::Status(status));
@@ -1150,7 +1151,7 @@ impl AppState {
                                     let fraction = if total <= 1 {
                                         0.0
                                     } else {
-                                        active_idx as f32 / (total - 1) as f32
+                                        (active_idx as f32 + 0.5) / total as f32
                                     };
                                     tasks.push(
                                         scrollable::snap_to(
@@ -3329,8 +3330,14 @@ impl AppState {
                     loop {
                         if let Ok((len, _)) = s.recv_from(&mut buf).await {
                             let msg = String::from_utf8_lossy(&buf[..len]);
-                            if msg.trim() == "like" {
-                                return Some((Message::ToggleLikeCurrent, Some(s)));
+                            match msg.trim() {
+                                "like" => return Some((Message::ToggleLikeCurrent, Some(s))),
+                                "play-pause" => return Some((Message::PlayPause, Some(s))),
+                                "next" => return Some((Message::NextTrack, Some(s))),
+                                "prev" => return Some((Message::PreviousTrack, Some(s))),
+                                "shuffle" => return Some((Message::ToggleShuffle, Some(s))),
+                                "repeat" => return Some((Message::ToggleRepeat, Some(s))),
+                                _ => {}
                             }
                         }
                     }
@@ -3555,6 +3562,10 @@ pub fn run() -> iced::Result {
         .window(iced::window::Settings {
             size: iced::Size::new(960.0, 640.0),
             min_size: Some(iced::Size::new(700.0, 480.0)),
+            platform_specific: iced::window::settings::PlatformSpecific {
+                application_id: "omatunes".to_string(),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .run_with(AppState::new)
