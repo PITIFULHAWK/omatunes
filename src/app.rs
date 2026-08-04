@@ -212,6 +212,7 @@ pub enum Message {
     SelectAllFolders,
     PlayFolder(PathBuf),
     CreatePlaylistFromFolder(PathBuf),
+    ToggleFolderExpanded(PathBuf),
     SelectArtist(String),
     SelectAlbum(String),
     SelectAllArtists,
@@ -687,6 +688,7 @@ pub struct AppState {
     pub achievements_search_query: String,
     pub achievements_cover_cache: std::sync::Mutex<std::collections::HashMap<String, iced::widget::image::Handle>>,
     pub achievements_items: Vec<AchievementItem>,
+    pub expanded_folders: std::collections::HashSet<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -1100,6 +1102,7 @@ impl AppState {
             achievements_search_query: String::new(),
             achievements_cover_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
             achievements_items: Vec::new(),
+            expanded_folders: std::collections::HashSet::new(),
         };
 
         if let Some(cached_tracks) = crate::library::load_cache() {
@@ -1309,33 +1312,132 @@ impl AppState {
         genres
     }
 
-    pub fn folders_display(&self) -> Vec<(PathBuf, String, usize)> {
+    /// Returns a hierarchical folder list for the sidebar.
+    /// Each entry: (absolute_path, display_name, track_count, depth, has_children, is_expanded)
+    ///
+    /// Automatically finds the deepest "branching" folder under music_dir (i.e. the folder
+    /// that splits into multiple named subfolders — your mood/playlist root).
+    /// Each of its direct children is shown as a top-level entry.
+    /// For folders that contain album subfolders (discography-style), a chevron lets you
+    /// expand them to browse individual albums.
+    pub fn folders_display(&self) -> Vec<(PathBuf, String, usize, u8, bool, bool)> {
         let music_dir = crate::config::get().music_path();
-        let mut folder_counts: std::collections::BTreeMap<PathBuf, usize> = std::collections::BTreeMap::new();
+
+        // Collect all unique direct-parent directories of tracks
+        let mut all_leaf_dirs: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
         for track in self.all_tracks.iter() {
             if let Some(parent) = track.path.parent() {
-                *folder_counts.entry(parent.to_path_buf()).or_insert(0) += 1;
+                all_leaf_dirs.insert(parent.to_path_buf());
+            }
+        }
+
+        if all_leaf_dirs.is_empty() {
+            return Vec::new();
+        }
+
+        // Find the "playlist root": walk DOWN from music_dir through single-child directories
+        // until we reach a directory that has multiple children containing music.
+        // This handles arbitrary nesting: ~/Music/AppleMusicDecrypt/playlists -> 8 mood folders.
+        let mut playlist_root = music_dir.clone();
+        loop {
+            // Count how many unique children of playlist_root contain tracks (directly or recursively)
+            let mut children_with_tracks: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+            for leaf in &all_leaf_dirs {
+                if leaf.starts_with(&playlist_root) {
+                    // Get the direct child of playlist_root that leads to this leaf
+                    if let Ok(rel) = leaf.strip_prefix(&playlist_root) {
+                        if let Some(first_component) = rel.components().next() {
+                            children_with_tracks.insert(playlist_root.join(first_component));
+                        }
+                    }
+                }
+            }
+
+            if children_with_tracks.len() > 1 {
+                // Found the branching point — children of playlist_root are our mood folders
+                break;
+            } else if children_with_tracks.len() == 1 {
+                // Only one child — descend into it
+                let only_child = children_with_tracks.into_iter().next().unwrap();
+                playlist_root = only_child;
+            } else {
+                // No children found — stay here
+                break;
+            }
+        }
+
+        // Now children of playlist_root are the top-level mood folders
+        let mut top_level_set: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+        for leaf in &all_leaf_dirs {
+            if leaf.starts_with(&playlist_root) {
+                if let Ok(rel) = leaf.strip_prefix(&playlist_root) {
+                    if let Some(first_component) = rel.components().next() {
+                        top_level_set.insert(playlist_root.join(first_component));
+                    }
+                }
             }
         }
 
         let query = self.sidebar_search.trim().to_lowercase();
-        let mut result = Vec::new();
+        let mut result: Vec<(PathBuf, String, usize, u8, bool, bool)> = Vec::new();
 
-        for (folder_path, count) in folder_counts {
-            let rel_path = folder_path.strip_prefix(&music_dir)
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_else(|_| {
-                    folder_path.file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| "Folder".to_string())
-                });
+        let mut sorted_top: Vec<PathBuf> = top_level_set.into_iter().collect();
+        sorted_top.sort();
 
-            if query.is_empty() || rel_path.to_lowercase().contains(&query) {
-                result.push((folder_path, rel_path, count));
+        for top_path in &sorted_top {
+            let top_name = top_path.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "Folder".to_string());
+
+            // Recursive track count for this mood folder (includes all album subfolders)
+            let top_count: usize = self.all_tracks.iter()
+                .filter(|t| t.path.starts_with(top_path))
+                .count();
+
+            // Find unique direct child subfolders of top_path that contain tracks
+            // (these are album/EP subfolders for discography-style folders)
+            let mut child_folders: std::collections::BTreeSet<PathBuf> = std::collections::BTreeSet::new();
+            for track in self.all_tracks.iter() {
+                if let Some(parent) = track.path.parent() {
+                    if parent != top_path.as_path() && parent.starts_with(top_path) {
+                        if let Ok(rel) = parent.strip_prefix(top_path) {
+                            if let Some(first_component) = rel.components().next() {
+                                child_folders.insert(top_path.join(first_component));
+                            }
+                        }
+                    }
+                }
+            }
+            let has_children = !child_folders.is_empty();
+            let is_expanded = self.expanded_folders.contains(top_path);
+
+            // Search filter: match if top name matches, OR any child album matches
+            let top_matches = query.is_empty() || top_name.to_lowercase().contains(&query);
+            let any_child_matches = !query.is_empty() && child_folders.iter().any(|c| {
+                c.file_name().map(|n| n.to_string_lossy().to_lowercase().contains(&query)).unwrap_or(false)
+            });
+
+            if top_matches || any_child_matches {
+                result.push((top_path.clone(), top_name, top_count, 0, has_children, is_expanded));
+
+                // If expanded (or search forces it), push child subfolders at depth=1
+                if is_expanded || any_child_matches {
+                    for child_path in &child_folders {
+                        let child_name = child_path.file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| "Album".to_string());
+                        let child_count: usize = self.all_tracks.iter()
+                            .filter(|t| t.path.starts_with(child_path))
+                            .count();
+                        let child_matches = query.is_empty() || child_name.to_lowercase().contains(&query);
+                        if child_matches {
+                            result.push((child_path.clone(), child_name, child_count, 1, false, false));
+                        }
+                    }
+                }
             }
         }
 
-        result.sort_by(|a, b| a.1.cmp(&b.1));
         result
     }
 
@@ -3393,11 +3495,23 @@ impl AppState {
                 Task::none()
             }
 
+            Message::ToggleFolderExpanded(path) => {
+                if self.expanded_folders.contains(&path) {
+                    self.expanded_folders.remove(&path);
+                } else {
+                    self.expanded_folders.insert(path);
+                }
+                Task::none()
+            }
+
             Message::PlayFolder(folder_path) => {
-                let folder_tracks: Vec<Track> = self.all_tracks.iter()
+                // Collect ALL tracks recursively (handles discography folders with album subfolders)
+                let mut folder_tracks: Vec<Track> = self.all_tracks.iter()
                     .filter(|t| t.path.starts_with(&folder_path))
                     .cloned()
                     .collect();
+                // Sort by path for consistent album order
+                folder_tracks.sort_by(|a, b| a.path.cmp(&b.path));
                 if !folder_tracks.is_empty() {
                     self.queue = folder_tracks.clone();
                     if let Some(first) = folder_tracks.first().cloned() {
@@ -3411,10 +3525,12 @@ impl AppState {
                 let folder_name = folder_path.file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| "New Playlist".to_string());
-                let track_paths: Vec<PathBuf> = self.all_tracks.iter()
+                // Collect ALL tracks recursively (handles discography folders)
+                let mut track_paths: Vec<PathBuf> = self.all_tracks.iter()
                     .filter(|t| t.path.starts_with(&folder_path))
                     .map(|t| t.path.clone())
                     .collect();
+                track_paths.sort();
                 
                 if !track_paths.is_empty() {
                     let mut pl_name = folder_name.clone();
@@ -3691,12 +3807,12 @@ impl AppState {
                             let folders = self.folders_display();
                             if !folders.is_empty() {
                                 let current_idx = self.selected_folder.as_ref()
-                                    .and_then(|sf| folders.iter().position(|(p, _, _)| p == sf));
+                                    .and_then(|sf| folders.iter().position(|(p, _, _, _, _, _)| p == sf));
                                 let next_idx = match current_idx {
                                     Some(i) => if i == 0 { folders.len() - 1 } else { i - 1 },
                                     None => 0,
                                 };
-                                if let Some((path, _, _)) = folders.get(next_idx).cloned() {
+                                if let Some((path, _, _, _, _, _)) = folders.get(next_idx).cloned() {
                                     self.selected_folder = Some(path);
                                     self.update_filtered_tracks();
                                 }
@@ -3781,12 +3897,12 @@ impl AppState {
                             let folders = self.folders_display();
                             if !folders.is_empty() {
                                 let current_idx = self.selected_folder.as_ref()
-                                    .and_then(|sf| folders.iter().position(|(p, _, _)| p == sf));
+                                    .and_then(|sf| folders.iter().position(|(p, _, _, _, _, _)| p == sf));
                                 let next_idx = match current_idx {
                                     Some(i) => (i + 1) % folders.len(),
                                     None => 0,
                                 };
-                                if let Some((path, _, _)) = folders.get(next_idx).cloned() {
+                                if let Some((path, _, _, _, _, _)) = folders.get(next_idx).cloned() {
                                     self.selected_folder = Some(path);
                                     self.update_filtered_tracks();
                                 }
@@ -4134,7 +4250,7 @@ impl AppState {
                                 match self.view_mode {
                                     ViewMode::Folders => {
                                         if self.selected_folder.is_none() {
-                                            if let Some((path, _, _)) = self.folders_display().first().cloned() {
+                                            if let Some((path, _, _, _, _, _)) = self.folders_display().first().cloned() {
                                                 self.selected_folder = Some(path);
                                                 self.update_filtered_tracks();
                                             }

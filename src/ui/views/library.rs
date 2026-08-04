@@ -210,22 +210,18 @@ fn folder_sidebar(state: &AppState) -> Element<'_, Message> {
 
     let sidebar_items: Element<Message> = match state.view_mode {
         ViewMode::Folders => {
+            // folders_display() returns: (path, name, count, depth, has_children, is_expanded)
             let folders = state.folders_display();
-            let mut list_items: Vec<Element<'_, Message>> = folders.into_iter().map(|(path, name, count)| {
+            let mut list_items: Vec<Element<'_, Message>> = folders.into_iter().map(|(path, name, count, depth, has_children, is_expanded)| {
                 let is_selected = state.selected_folder.as_ref() == Some(&path) && state.selected_playlist.is_none();
                 let label_color = if is_selected { theme::accent() } else { theme::text() };
 
-                let folder_icon = text(crate::ui::icons::ICON_FOLDER)
-                    .font(crate::ui::icons::NERD_FONT_MONO)
-                    .size(13)
-                    .color(if is_selected { theme::accent() } else { theme::overlay0() });
-
-                let folder_label = text(name)
+                let folder_label = text(name.clone())
                     .color(label_color)
-                    .size(13);
+                    .size(if depth == 0 { 13 } else { 12 });
 
                 let badge = container(
-                    text(format!("{} track{}", count, if count == 1 { "" } else { "s" }))
+                    text(format!("{}", count))
                         .size(10)
                         .color(theme::subtext())
                 )
@@ -259,28 +255,84 @@ fn folder_sidebar(state: &AppState) -> Element<'_, Message> {
                 .style(iced::widget::button::text)
                 .padding([2, 4]);
 
-                let btn_row = row![
-                    folder_icon,
-                    Space::with_width(6),
-                    container(folder_label).width(Length::Fill),
-                    badge,
-                    Space::with_width(4),
-                    create_pl_btn,
-                    play_folder_btn,
-                    Space::with_width(4),
-                ]
-                .align_y(Alignment::Center);
+                if depth == 0 {
+                    // Top-level mood folder row: shows expand chevron if it has album subfolders
+                    let chevron_icon: Element<'_, Message> = if has_children {
+                        let chevron_char = if is_expanded { "\u{f078}" } else { "\u{f054}" };
+                        button(
+                            text(chevron_char)
+                                .font(crate::ui::icons::NERD_FONT_MONO)
+                                .size(10)
+                                .color(theme::overlay0())
+                        )
+                        .on_press(Message::ToggleFolderExpanded(path.clone()))
+                        .style(iced::widget::button::text)
+                        .padding([2, 4])
+                        .into()
+                    } else {
+                        Space::with_width(16.0).into()
+                    };
 
-                let btn = button(btn_row)
-                    .on_press(Message::SelectFolder(path.clone()))
-                    .style(iced::widget::button::text)
-                    .width(Length::Fill)
-                    .padding([4, 8]);
+                    let folder_icon = text(crate::ui::icons::ICON_FOLDER)
+                        .font(crate::ui::icons::NERD_FONT_MONO)
+                        .size(13)
+                        .color(if is_selected { theme::accent() } else { theme::overlay0() });
 
-                if is_selected {
-                    container(btn).style(theme::selected_row).width(Length::Fill).into()
+                    let btn_row = row![
+                        chevron_icon,
+                        folder_icon,
+                        Space::with_width(5),
+                        container(folder_label).width(Length::Fill),
+                        badge,
+                        Space::with_width(2),
+                        create_pl_btn,
+                        play_folder_btn,
+                        Space::with_width(2),
+                    ]
+                    .align_y(Alignment::Center);
+
+                    let btn = button(btn_row)
+                        .on_press(Message::SelectFolder(path.clone()))
+                        .style(iced::widget::button::text)
+                        .width(Length::Fill)
+                        .padding([5, 6]);
+
+                    if is_selected {
+                        container(btn).style(theme::selected_row).width(Length::Fill).into()
+                    } else {
+                        container(btn).width(Length::Fill).into()
+                    }
                 } else {
-                    container(btn).width(Length::Fill).into()
+                    // Album subfolder row — indented with open-folder icon
+                    let subfolder_icon = text("\u{f07b}") // nf-fa-folder_open
+                        .font(crate::ui::icons::NERD_FONT_MONO)
+                        .size(11)
+                        .color(if is_selected { theme::accent() } else { theme::overlay0() });
+
+                    let btn_row = row![
+                        Space::with_width(24),
+                        subfolder_icon,
+                        Space::with_width(5),
+                        container(folder_label).width(Length::Fill),
+                        badge,
+                        Space::with_width(2),
+                        create_pl_btn,
+                        play_folder_btn,
+                        Space::with_width(2),
+                    ]
+                    .align_y(Alignment::Center);
+
+                    let btn = button(btn_row)
+                        .on_press(Message::SelectFolder(path.clone()))
+                        .style(iced::widget::button::text)
+                        .width(Length::Fill)
+                        .padding([3, 6]);
+
+                    if is_selected {
+                        container(btn).style(theme::selected_row).width(Length::Fill).into()
+                    } else {
+                        container(btn).width(Length::Fill).into()
+                    }
                 }
             })
             .collect();
