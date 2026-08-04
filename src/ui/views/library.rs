@@ -70,10 +70,11 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
 
 fn folder_sidebar(state: &AppState) -> Element<'_, Message> {
     let total_width = state.sidebar_width.round() - 16.0;
-    let available_width = total_width - 12.0;
-    let tab_width_1 = (available_width / 3.0).floor();
-    let tab_width_2 = (available_width / 3.0).floor();
-    let tab_width_3 = available_width - tab_width_1 - tab_width_2;
+    let available_width = total_width - 18.0;
+    let tab_width_1 = (available_width / 4.0).floor();
+    let tab_width_2 = (available_width / 4.0).floor();
+    let tab_width_3 = (available_width / 4.0).floor();
+    let tab_width_4 = available_width - tab_width_1 - tab_width_2 - tab_width_3;
 
     let tab_btn = |mode: ViewMode, icon: &'static str, label: &'static str, width: f32| {
         let is_active = state.view_mode == mode && state.selected_playlist.is_none();
@@ -129,15 +130,17 @@ fn folder_sidebar(state: &AppState) -> Element<'_, Message> {
     };
 
     let filter_tabs = row![
-        tab_btn(ViewMode::Artists, crate::ui::icons::ICON_PERSON, "Artists", tab_width_1),
-        tab_btn(ViewMode::Albums, crate::ui::icons::ICON_CD, "Albums", tab_width_2),
-        tab_btn(ViewMode::Genres, crate::ui::icons::ICON_TAG, "Genres", tab_width_3),
+        tab_btn(ViewMode::Folders, crate::ui::icons::ICON_FOLDER, "Folders", tab_width_1),
+        tab_btn(ViewMode::Artists, crate::ui::icons::ICON_PERSON, "Artists", tab_width_2),
+        tab_btn(ViewMode::Albums, crate::ui::icons::ICON_CD, "Albums", tab_width_3),
+        tab_btn(ViewMode::Genres, crate::ui::icons::ICON_TAG, "Genres", tab_width_4),
     ]
     .spacing(6.0)
     .align_y(Alignment::Center)
     .width(Length::Fill);
 
     let sidebar_search_placeholder = match state.view_mode {
+        ViewMode::Folders => "Search Folders...",
         ViewMode::Artists | ViewMode::NowPlaying => "Search Artists...",
         ViewMode::Albums => "Search Albums...",
         ViewMode::Genres => "Search Genres...",
@@ -206,6 +209,130 @@ fn folder_sidebar(state: &AppState) -> Element<'_, Message> {
     .into();
 
     let sidebar_items: Element<Message> = match state.view_mode {
+        ViewMode::Folders => {
+            let folders = state.folders_display();
+            let mut list_items: Vec<Element<'_, Message>> = folders.into_iter().map(|(path, name, count)| {
+                let is_selected = state.selected_folder.as_ref() == Some(&path) && state.selected_playlist.is_none();
+                let label_color = if is_selected { theme::accent() } else { theme::text() };
+
+                let folder_icon = text(crate::ui::icons::ICON_FOLDER)
+                    .font(crate::ui::icons::NERD_FONT_MONO)
+                    .size(13)
+                    .color(if is_selected { theme::accent() } else { theme::overlay0() });
+
+                let folder_label = text(name)
+                    .color(label_color)
+                    .size(13);
+
+                let badge = container(
+                    text(format!("{} track{}", count, if count == 1 { "" } else { "s" }))
+                        .size(10)
+                        .color(theme::subtext())
+                )
+                .padding([2, 6])
+                .style(|_| iced::widget::container::Style {
+                    background: Some(iced::Background::Color(theme::surface0())),
+                    border: iced::Border {
+                        radius: 4.0.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                });
+
+                let play_folder_btn = button(
+                    text("\u{f04b}")
+                        .font(crate::ui::icons::NERD_FONT_MONO)
+                        .color(theme::accent())
+                        .size(11)
+                )
+                .on_press(Message::PlayFolder(path.clone()))
+                .style(iced::widget::button::text)
+                .padding([2, 4]);
+
+                let create_pl_btn = button(
+                    text(crate::ui::icons::ICON_PLAYLIST_PLUS)
+                        .font(crate::ui::icons::NERD_FONT_MONO)
+                        .color(theme::subtext())
+                        .size(11)
+                )
+                .on_press(Message::CreatePlaylistFromFolder(path.clone()))
+                .style(iced::widget::button::text)
+                .padding([2, 4]);
+
+                let btn_row = row![
+                    folder_icon,
+                    Space::with_width(6),
+                    container(folder_label).width(Length::Fill),
+                    badge,
+                    Space::with_width(4),
+                    create_pl_btn,
+                    play_folder_btn,
+                    Space::with_width(4),
+                ]
+                .align_y(Alignment::Center);
+
+                let btn = button(btn_row)
+                    .on_press(Message::SelectFolder(path.clone()))
+                    .style(iced::widget::button::text)
+                    .width(Length::Fill)
+                    .padding([4, 8]);
+
+                if is_selected {
+                    container(btn).style(theme::selected_row).width(Length::Fill).into()
+                } else {
+                    container(btn).width(Length::Fill).into()
+                }
+            })
+            .collect();
+
+            let is_all_selected = state.selected_folder.is_none() && state.selected_playlist.is_none();
+            let label_color = theme::accent();
+            let total_tracks = state.all_tracks.len();
+            let all_btn_row = row![
+                button(
+                    row![
+                        text(crate::ui::icons::ICON_FOLDER)
+                            .font(crate::ui::icons::NERD_FONT_MONO)
+                            .size(13)
+                            .color(label_color),
+                        Space::with_width(6),
+                        container(
+                            text("All Folders")
+                                .color(label_color)
+                                .size(13)
+                                .font(crate::ui::icons::UI_FONT_BOLD)
+                        ).width(Length::Fill),
+                        container(
+                            text(format!("{} tracks", total_tracks))
+                                .size(10)
+                                .color(theme::subtext())
+                        )
+                        .padding([2, 6])
+                        .style(|_| iced::widget::container::Style {
+                            background: Some(iced::Background::Color(theme::surface0())),
+                            border: iced::Border {
+                                radius: 4.0.into(),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        }),
+                    ].align_y(Alignment::Center)
+                )
+                .on_press(Message::SelectAllFolders)
+                .style(iced::widget::button::text)
+                .width(Length::Fill)
+                .padding([6, 12])
+            ].align_y(Alignment::Center);
+
+            let all_row_widget: Element<'_, Message> = if is_all_selected {
+                container(all_btn_row).style(theme::selected_row).width(Length::Fill).into()
+            } else {
+                container(all_btn_row).width(Length::Fill).into()
+            };
+
+            list_items.insert(0, all_row_widget);
+            column(list_items).spacing(2).into()
+        }
         ViewMode::Artists | ViewMode::NowPlaying => {
             let mut list_items: Vec<Element<'_, Message>> = state.artists().into_iter().map(|artist| {
                 let is_selected = state.selected_artist.as_ref() == Some(&artist) && state.selected_playlist.is_none();
